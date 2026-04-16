@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "FloodGuard Admin Web Landing",
+    "slug": "floodguard-admin-web-admin",
+    "sdkVersion": "54.0.0",
+    "platforms": [
+      "web"
+    ],
+    "plugins": [
+      "expo-font"
+    ],
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -r \"TODO\\\\|FIXME\\\\|BUG\\\\|HACK\" /c/xampp/htdocs/FloodGuard/backend_flask --include=*.py)",
+      "Bash(grep -E \"\\\\.js$\")",
+      "Bash(python -c \":*)",
+      "Bash(python:*)",
+      "Bash(grep -r \"password\" routes/*.py models/*.py)",
+      "Bash(mysql:*)",
+      "Bash(grep -E \"ALTER TABLE|ADD COLUMN\" /c/xampp/htdocs/FloodGuard/backend_flask/add_*.py)",
+      "Bash(find C:/xampp/htdocs/FloodGuard -maxdepth 3 -path *frontend/mobile* -prune -o -name package.json -type f -print)",
+      "Bash(grep -h \"ALTER TABLE users\" add_*.py)",
+      "Bash(du -sh C:/xampp/htdocs/FloodGuard/*)",
+      "Bash(npm install:*)",
+      "Bash(npm show:*)",
+      "Bash(npx expo:*)",
+      "Bash(ipconfig)",
+      "Bash(1 npm:*)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\(''''react-native-maps'''', ''''not found''''\\)\\)\")",
+      "Bash(node:*)"
+    ]
+  }
+}

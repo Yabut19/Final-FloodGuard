@@ -1,0 +1,8 @@
+{
+  "expo": {
+    "name": "FloodGuard Admin Web",
+    "slug": "floodguard-admin-web",
+    "sdkVersion": "54.0.0",
+    "platforms": ["web"]
+  }
+}

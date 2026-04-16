@@ -1,0 +1,28 @@
+# Environment files — never commit secrets
+.env
+.env.local
+.env.*.local
+
+# Debug / temporary credential dumps
+debug_creds.json
+debug_creds*.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Uploads (user-generated content)
+backend_flask/uploads/
+backend_flask/static/uploads/
+
+# Node / React
+node_modules/
+.expo/
+dist/
+build/
+
+# OS artefacts
+.DS_Store
+Thumbs.db
