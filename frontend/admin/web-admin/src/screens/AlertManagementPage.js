@@ -15,7 +15,8 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     
     // Verification state
     const [verifyFloodLevel, setVerifyFloodLevel] = useState("medium");
-    const [incidentStatus, setIncidentStatus] = useState("Active");
+    const [incidentStatus, setIncidentStatus] = useState("");
+    const [statusError, setStatusError] = useState(false);
     const [verifications, setVerifications] = useState([]);
     const [allReports, setAllReports] = useState([]);
     const [alertHistory, setAlertHistory] = useState([]);
@@ -375,11 +376,24 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     };
 
     const handleVerify = async (id, report) => {
+        let hasError = false;
+        
         if (!recommendedAction || !recommendedAction.trim()) {
             setRecError(true);
-            return;
+            hasError = true;
+        } else {
+            setRecError(false);
         }
-        setRecError(false);
+        
+        if (!incidentStatus) {
+            setStatusError(true);
+            hasError = true;
+        } else {
+            setStatusError(false);
+        }
+
+        if (hasError) return;
+        
         try {
             // Update report status to verified
             const response = await fetch(`${API_BASE_URL}/api/reports/${id}/verify`, {
@@ -603,9 +617,10 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                         setSelectedReportForModal(item);
                                         setShowReportDetailsModal(true);
                                         setVerifyFloodLevel(item.flood_level_reported || "medium");
-                                        setIncidentStatus("Active");
+                                        setIncidentStatus("");
                                         setRecommendedAction("");
                                         setRecError(false);
+                                        setStatusError(false);
                                         fetchSensorDataForBarangay(item.location);
                                     }}
                                 >
@@ -971,12 +986,19 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
                                         {/* Incident Status */}
                                         <View style={{ marginBottom: 16 }}>
-                                            <Text style={{ fontSize: 13, fontFamily: "Poppins_600SemiBold", color: '#1e293b', marginBottom: 8 }}>Current Incident Status:</Text>
+                                            <Text style={{ fontSize: 13, fontFamily: "Poppins_600SemiBold", color: '#1e293b', marginBottom: 4 }}>
+                                                Current Incident Status <Text style={{ color: '#ef4444' }}>*</Text>
+                                            </Text>
+                                            {statusError && (
+                                                <Text style={{ color: '#ef4444', fontSize: 12, marginBottom: 6 }}>
+                                                    ⚠ Status is required before verifying.
+                                                </Text>
+                                            )}
                                             <View style={{ flexDirection: "row", gap: 8 }}>
                                                 {["Active", "Resolved"].map((status) => (
                                                     <TouchableOpacity
                                                         key={status}
-                                                        onPress={() => setIncidentStatus(status)}
+                                                        onPress={() => { setIncidentStatus(status); setStatusError(false); }}
                                                         style={{
                                                             flex: 1,
                                                             paddingVertical: 10,
@@ -984,7 +1006,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                                             alignItems: "center",
                                                             backgroundColor: incidentStatus === status ? "#0ea5e920" : "#ffffff",
                                                             borderWidth: incidentStatus === status ? 2 : 1,
-                                                            borderColor: incidentStatus === status ? "#0ea5e9" : "#e2e8f0",
+                                                            borderColor: incidentStatus === status ? "#0ea5e9" : statusError ? "#ef4444" : "#e2e8f0",
                                                         }}
                                                     >
                                                         <Text style={{ color: incidentStatus === status ? "#0ea5e9" : "#64748b", fontFamily: "Poppins_600SemiBold", fontSize: 11 }}>{status}</Text>

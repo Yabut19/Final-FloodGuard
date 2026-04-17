@@ -2687,7 +2687,7 @@ const AlertDetailScreen = ({ route, navigation }) => {
             <Text style={[styles.alertDetailLabel, { color: '#34d399', marginBottom: 0 }]}>Official Recommendation</Text>
           </View>
           <Text style={[styles.alertDetailDescription, { fontStyle: 'italic', color: '#ffffff' }]}>
-            {alert.recommended_action || alert.actions || "No specific action recommended. Stay tuned for updates from local officials."}
+            {alert.recommended_action || alert.recommendations || alert.actions || "No specific action recommended. Stay tuned for updates from local officials."}
           </Text>
         </Card>
 
@@ -2697,14 +2697,14 @@ const AlertDetailScreen = ({ route, navigation }) => {
           <View style={[
             styles.incidentBadge,
             { paddingHorizontal: 12, paddingVertical: 6 },
-            alert.incident_status === "Resolved" ? styles.incidentBadgeResolved : styles.incidentBadgeActive
+            (alert.incident_status === "Resolved" || alert.report_status === "Resolved") ? styles.incidentBadgeResolved : styles.incidentBadgeActive
           ]}>
             <Text style={[
               styles.incidentBadgeText,
               { fontSize: 12 },
-              alert.incident_status === "Resolved" && styles.incidentBadgeTextResolved
+              (alert.incident_status === "Resolved" || alert.report_status === "Resolved") && styles.incidentBadgeTextResolved
             ]}>
-              {alert.incident_status || (alert.status === "resolved" ? "Resolved" : "Active")}
+              {alert.incident_status || alert.report_status || (alert.status === "resolved" ? "Resolved" : "Active")}
             </Text>
           </View>
         </Card>
@@ -3791,12 +3791,14 @@ const ReportScreen = ({ navigation, userName }) => {
                   <View
                     style={[
                       styles.reportStatus,
-                      report.status === "Verified"
+                      report.status?.toLowerCase() === "verified"
                         ? styles.reportStatusVerified
                         : styles.reportStatusReview,
                     ]}
                   >
-                    <Text style={styles.reportStatusText}>{report.status}</Text>
+                    <Text style={styles.reportStatusText}>
+                      {report.status ? report.status.charAt(0).toUpperCase() + report.status.slice(1) : ""}
+                    </Text>
                   </View>
                 </View>
                 <Text style={styles.reportItemLocation}>{report.location}</Text>
