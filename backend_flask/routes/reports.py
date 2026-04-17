@@ -223,12 +223,17 @@ def get_pending_reports():
 def verify_report(report_id):
     """Verify and broadcast a user report - triggers alert to all subscribers"""
     data = request.get_json() or {}
+    logger.info("VERIFY report_id=%s raw data=%s", report_id, data)
+
     verified_by = data.get('verified_by')  # LGU admin username/email
     flood_level = data.get('flood_level')  # Official flood level classification
-    
-    recommendations = data.get('recommendations') or data.get('recommended_action', '')
+
+    recommendations = data.get('recommendations') or data.get('recommended_action') or ''
     report_status = data.get('report_status') or 'Active'
-    
+
+    logger.info("VERIFY parsed: verified_by=%r flood_level=%r recommendations=%r report_status=%r",
+                verified_by, flood_level, recommendations, report_status)
+
     if not verified_by:
         return jsonify({"error": "verified_by (LGU official) is required"}), 400
     
