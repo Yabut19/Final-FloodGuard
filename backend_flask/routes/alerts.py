@@ -25,6 +25,23 @@ def dismiss_alert_for_user(user_id, alert_id):
     finally:
         cursor.close()
 
+@alerts_bp.route('/<int:alert_id>', methods=['GET'])
+def get_alert(alert_id):
+    """Fetch a single alert by ID (used by mobile Alert Detail screen)."""
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT * FROM alerts WHERE id = %s", (alert_id,))
+        alert = cursor.fetchone()
+        if not alert:
+            return jsonify({"error": "Alert not found"}), 404
+        return jsonify(alert), 200
+    except Exception as e:
+        logger.error("Failed to fetch alert %s: %s", alert_id, e)
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cursor.close()
+
 @alerts_bp.route('/<int:alert_id>', methods=['DELETE'])
 def delete_alert(alert_id):
     """Delete an alert by ID (system-wide - for LGU/ADMIN only)"""

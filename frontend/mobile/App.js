@@ -2432,6 +2432,25 @@ const AlertsScreen = ({ navigation }) => {
             <Feather name="trash-2" size={16} color="#e2463b" />
           </TouchableOpacity>
         </View>
+
+        {/* Level Badge (Official Flood Level) */}
+        {alert.level && (
+          <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+            <View style={[
+              styles.levelBadge,
+              {
+                backgroundColor:
+                  alert.level === "critical" ? "#e2463b" :
+                    alert.level === "warning" ? "#f29339" : "#f5c542"
+              }
+            ]}>
+              <Text style={styles.levelBadgeText}>
+                {alert.level === "critical" ? "HIGH" : alert.level === "warning" ? "MEDIUM" : "LOW"} LEVEL
+              </Text>
+            </View>
+          </View>
+        )}
+
         <Text style={styles.alertDescription}>{alert.description}</Text>
         {(alert.recommended_action || alert.actions) ? (
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginTop: 6, gap: 6 }}>
@@ -2528,8 +2547,21 @@ const AlertDetailScreen = ({ route, navigation }) => {
   const { theme } = useTheme();
   const styles = getStyles(theme);
 
-  const alert = route?.params?.alert;
+  const paramAlert = route?.params?.alert;
+  const [alert, setAlert] = useState(paramAlert);
   const topInset = Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0;
+
+  useEffect(() => {
+    if (!paramAlert) return;
+    // Derive the numeric DB id from either plain id or "alert-123" prefix
+    const rawId = String(paramAlert.id).replace(/^alert-/, '');
+    if (!rawId || isNaN(Number(rawId))) return;
+    fetch(`${API_BASE}/api/alerts/${rawId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setAlert(prev => ({ ...prev, ...data })); })
+      .catch(() => {});
+  }, []);
+
   if (!alert) {
     return null;
   }
@@ -2613,31 +2645,68 @@ const AlertDetailScreen = ({ route, navigation }) => {
       <ScrollView contentContainerStyle={styles.alertDetailContent}>
         <Card style={styles.alertDetailCard}>
           <Text style={styles.alertDetailTitle}>{alert.title}</Text>
+          
+          {/* Detailed Level Indicator */}
+          {alert.level && (
+            <View style={{ flexDirection: 'row', marginTop: 12, marginBottom: 8, alignItems: 'center', gap: 8 }}>
+              <View style={[
+                styles.levelBadge,
+                {
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  backgroundColor:
+                    alert.level === "critical" ? "#e2463b" :
+                      alert.level === "warning" ? "#f29339" : "#f5c542"
+                }
+              ]}>
+                <Text style={[styles.levelBadgeText, { fontSize: 12 }]}>
+                  {alert.level === "critical" ? "HIGH" : alert.level === "warning" ? "MEDIUM" : "LOW"} LEVEL
+                </Text>
+              </View>
+              <Text style={{ color: '#94a3b8', fontSize: 13, fontWeight: '600' }}>Official Flood Level</Text>
+            </View>
+          )}
+
           <Text style={styles.alertDetailDescription}>{alert.description}</Text>
           <View style={styles.alertDetailMeta}>
-            <Text style={styles.alertMetaText}>{alert.location}</Text>
-            <Text style={styles.alertMetaText}>{alert.timestamp}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="location-outline" size={14} color="#94a3b8" />
+              <Text style={styles.alertMetaText}>{alert.location}</Text>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="time-outline" size={14} color="#94a3b8" />
+              <Text style={styles.alertMetaText}>{alert.timestamp}</Text>
+            </View>
           </View>
         </Card>
-        <Card style={styles.alertDetailCard}>
-          <Text style={styles.alertDetailLabel}>Recommended Actions</Text>
-          <Text style={styles.alertDetailDescription}>
+
+        {/* Official Recommendation Section */}
+        <Card style={[styles.alertDetailCard, { borderLeftWidth: 4, borderLeftColor: '#34d399' }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <Ionicons name="shield-checkmark" size={18} color="#34d399" />
+            <Text style={[styles.alertDetailLabel, { color: '#34d399', marginBottom: 0 }]}>Official Recommendation</Text>
+          </View>
+          <Text style={[styles.alertDetailDescription, { fontStyle: 'italic', color: '#ffffff' }]}>
             {alert.recommended_action || alert.actions || "No specific action recommended. Stay tuned for updates from local officials."}
           </Text>
         </Card>
+
+        {/* Current Incident Status */}
         <Card style={styles.alertDetailCard}>
-          <Text style={styles.alertDetailLabel}>Status</Text>
-          <Text style={styles.alertDetailDescription}>
-            {alert.incident_status || (alert.status === "resolved"
-              ? "NORMAL MONITORING"
-              : alert.severity === "critical" || alert.title?.toLowerCase().includes("evacuat")
-                ? "ASSISTED EVACUATION"
-                : alert.severity === "warning" || alert.title?.toLowerCase().includes("pre-emptive")
-                  ? "PRE-EMPTIVE EVACUATION"
-                  : alert.severity === "advisory" || alert.title?.toLowerCase().includes("advisory")
-                    ? "ALERT / READY"
-                    : "NORMAL MONITORING")}
-          </Text>
+          <Text style={styles.alertDetailLabel}>Incident Status</Text>
+          <View style={[
+            styles.incidentBadge,
+            { paddingHorizontal: 12, paddingVertical: 6 },
+            alert.incident_status === "Resolved" ? styles.incidentBadgeResolved : styles.incidentBadgeActive
+          ]}>
+            <Text style={[
+              styles.incidentBadgeText,
+              { fontSize: 12 },
+              alert.incident_status === "Resolved" && styles.incidentBadgeTextResolved
+            ]}>
+              {alert.incident_status || (alert.status === "resolved" ? "Resolved" : "Active")}
+            </Text>
+          </View>
         </Card>
       </ScrollView>
     </SafeAreaView>
@@ -3732,6 +3801,56 @@ const ReportScreen = ({ navigation, userName }) => {
                 </View>
                 <Text style={styles.reportItemLocation}>{report.location}</Text>
                 <Text style={styles.reportItemTime}>{report.timestamp}</Text>
+
+                {/* Official Verification Details */}
+                {report.status.toLowerCase() === "verified" && (
+                  <View style={styles.verificationSection}>
+                    <View style={styles.verificationHeader}>
+                      <Ionicons name="shield-checkmark" size={14} color="#74C5E6" />
+                      <Text style={styles.verificationTitle}>Official Verification</Text>
+                    </View>
+
+                    <View style={styles.verificationGrid}>
+                      <View style={styles.verificationItem}>
+                        <Text style={styles.verificationLabel}>Flood Level</Text>
+                        <View style={[
+                          styles.levelBadge,
+                          {
+                            backgroundColor:
+                              report.flood_level_reported === "High" ? "#e2463b" :
+                                report.flood_level_reported === "Medium" ? "#f29339" : "#f5c542"
+                          }
+                        ]}>
+                          <Text style={styles.levelBadgeText}>{report.flood_level_reported || "Low"}</Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.verificationItem}>
+                        <Text style={styles.verificationLabel}>Status</Text>
+                        <View style={[
+                          styles.incidentBadge,
+                          report.report_status === "Resolved" ? styles.incidentBadgeResolved : styles.incidentBadgeActive
+                        ]}>
+                          <Text style={[
+                            styles.incidentBadgeText,
+                            report.report_status === "Resolved" && styles.incidentBadgeTextResolved
+                          ]}>
+                            {report.report_status || "Active"}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {report.recommendations && (
+                      <View style={styles.recommendationBlock}>
+                        <Text style={styles.recommendationLabel}>Official Recommendation</Text>
+                        <Text style={styles.recommendationText}>
+                          "{report.recommendations}"
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                )}
               </Card>
             ))}
           </View>
@@ -5935,6 +6054,95 @@ const getStyles = (theme) => StyleSheet.create({
     marginTop: 2,
     fontSize: 10,
     color: theme.textSecondary,
+  },
+  
+  // Official Verification UI Enhancement
+  verificationSection: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(116, 197, 230, 0.1)',
+    backgroundColor: 'rgba(116, 197, 230, 0.04)',
+    borderRadius: 16,
+    padding: 12,
+  },
+  verificationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 10,
+  },
+  verificationTitle: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#74C5E6',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  verificationGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginBottom: 12,
+  },
+  verificationItem: {
+    flex: 1,
+    minWidth: '40%',
+  },
+  verificationLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: theme.textTertiary || '#64748b',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
+  verificationValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: theme.textPrimary,
+  },
+  levelBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  levelBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    color: '#ffffff',
+  },
+  recommendationBlock: {
+    backgroundColor: 'rgba(52, 211, 153, 0.05)',
+    padding: 10,
+    borderRadius: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: '#34d399',
+  },
+  recommendationLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#34d399',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
+  recommendationText: {
+    fontSize: 12,
+    color: theme.textSecondary,
+    lineHeight: 18,
+    fontStyle: 'italic',
+  },
+  incidentBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignSelf: 'flex-start',
+  },
+  incidentBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
   },
   settingsHeader: {
     borderRadius: 18,
