@@ -120,7 +120,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             fetchAllReports();
             fetchAlertHistory();
             fetchActiveAlerts();
-        }, 30000);
+        }, 5000);
         return () => clearInterval(interval);
     }, []);
 

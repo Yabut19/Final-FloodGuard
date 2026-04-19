@@ -1,8 +1,57 @@
-from flask import Blueprint, request, jsonify
+import time
+from flask import Blueprint, request, jsonify, Response, stream_with_context
 from utils.db import get_db
 from datetime import datetime
 
 iot_bp = Blueprint("iot", __name__)
+
+# In-memory thresholds — updated via PUT /api/iot/thresholds from admin panel
+_thresholds = {
+    "advisory_cm":  10.0,
+    "warning_cm":   15.0,
+    "critical_cm":  25.0,
+}
+
+def _sync_thresholds_from_db():
+    """Read admin-saved thresholds from system_config and update _thresholds in memory."""
+    try:
+        db = get_db()
+        cur = db.cursor(dictionary=True)
+        cur.execute(
+            "SELECT config_key, config_value FROM system_config "
+            "WHERE config_key IN ('advisory_level','warning_level','critical_level')"
+        )
+        rows = cur.fetchall()
+        cur.close()
+        mapping = {r["config_key"]: float(r["config_value"]) for r in rows}
+        if "advisory_level" in mapping:
+            _thresholds["advisory_cm"] = mapping["advisory_level"]
+        if "warning_level" in mapping:
+            _thresholds["warning_cm"] = mapping["warning_level"]
+        if "critical_level" in mapping:
+            _thresholds["critical_cm"] = mapping["critical_level"]
+    except Exception:
+        pass  # fall back to in-memory defaults
+
+
+@iot_bp.route("/thresholds", methods=["GET"])
+def get_thresholds():
+    """ESP32 calls this every 60 s. Always reflects what admin saved in Threshold Config."""
+    _sync_thresholds_from_db()
+    return jsonify(_thresholds), 200
+
+@iot_bp.route("/thresholds", methods=["PUT", "POST"])
+def set_thresholds():
+    data = request.get_json(silent=True) or {}
+    updated = {}
+    for key in ("advisory_cm", "warning_cm", "critical_cm"):
+        if key in data:
+            try:
+                _thresholds[key] = float(data[key])
+                updated[key] = _thresholds[key]
+            except (TypeError, ValueError):
+                return jsonify({"error": f"Invalid value for {key}"}), 400
+    return jsonify({"message": "Thresholds updated", "thresholds": _thresholds}), 200
 
 
 @iot_bp.route("/sensor-readings", methods=["POST"])
@@ -285,7 +334,8 @@ def get_all_sensors_status():
         
         # Get latest reading for EACH sensor
         cur.execute("""
-            SELECT r1.sensor_id, r1.flood_level, r1.status as reading_status, r1.created_at, r1.latitude, r1.longitude
+            SELECT r1.sensor_id, r1.flood_level, r1.raw_distance,
+                   r1.status as reading_status, r1.created_at, r1.latitude, r1.longitude
             FROM iot_readings r1
             INNER JOIN (
                 SELECT sensor_id, MAX(created_at) as max_at
@@ -306,6 +356,7 @@ def get_all_sensors_status():
             latest = readings_map.get(s['id'])
             if latest:
                 s['flood_level'] = float(latest['flood_level']) if latest['flood_level'] else 0
+                s['raw_distance'] = float(latest['raw_distance']) if latest.get('raw_distance') else 0
                 s['reading_status'] = latest['reading_status']
                 s['last_seen'] = latest['created_at'].isoformat() if isinstance(latest['created_at'], datetime) else str(latest['created_at'])
                 
@@ -318,6 +369,7 @@ def get_all_sensors_status():
                     s['is_offline'] = age_seconds > 30
             else:
                 s['flood_level'] = 0
+                s['raw_distance'] = 0
                 s['reading_status'] = 'OFFLINE'
                 s['is_offline'] = True
                 s['last_seen'] = None
@@ -542,3 +594,209 @@ def delete_sensor(sensor_id):
         db.rollback()
         cur.close()
         return jsonify({"error": str(e)}), 500
+
+
+# ── SERVER-SENT EVENTS: live flood data stream ─────────────────────────────────
+@iot_bp.route("/stream", methods=["GET"])
+def stream():
+    """
+    SSE endpoint — clients subscribe once and receive live sensor data
+    every 2 seconds without polling.
+    Usage (browser):
+        const es = new EventSource('http://<server>/api/iot/stream');
+        es.onmessage = e => { const d = JSON.parse(e.data); ... };
+    """
+    def generate():
+        last_payload = None
+        while True:
+            try:
+                db = get_db()
+                cur = db.cursor(dictionary=True)
+                cur.execute("""
+                    SELECT sensor_id, flood_level, raw_distance,
+                           status, latitude, longitude, maps_url, created_at
+                    FROM iot_readings
+                    ORDER BY created_at DESC LIMIT 1
+                """)
+                row = cur.fetchone()
+                cur.close()
+
+                if row:
+                    created_at = row.get("created_at")
+                    if isinstance(created_at, datetime):
+                        created_at_dt = created_at
+                    else:
+                        try:
+                            created_at_dt = datetime.strptime(
+                                str(created_at).replace("T", " ").split(".")[0],
+                                "%Y-%m-%d %H:%M:%S"
+                            )
+                        except Exception:
+                            created_at_dt = datetime.now()
+
+                    age = (datetime.now() - created_at_dt).total_seconds()
+                    is_offline = age > 10
+
+                    payload = {
+                        "sensor_id":    row.get("sensor_id"),
+                        "flood_level":  float(row.get("flood_level") or 0),
+                        "raw_distance": float(row.get("raw_distance") or 0),
+                        "status":       "OFFLINE" if is_offline else (row.get("status") or "NORMAL"),
+                        "latitude":     float(row["latitude"]) if row.get("latitude") else None,
+                        "longitude":    float(row["longitude"]) if row.get("longitude") else None,
+                        "maps_url":     row.get("maps_url"),
+                        "is_offline":   is_offline,
+                        "timestamp":    str(created_at),
+                    }
+                else:
+                    payload = {
+                        "sensor_id": None, "flood_level": 0,
+                        "raw_distance": 0, "status": "OFFLINE",
+                        "latitude": None, "longitude": None,
+                        "maps_url": None, "is_offline": True,
+                        "timestamp": None,
+                    }
+
+                import ujson as _j
+            except Exception:
+                import json as _j
+                payload = {
+                    "sensor_id": None, "flood_level": 0,
+                    "raw_distance": 0, "status": "OFFLINE",
+                    "latitude": None, "longitude": None,
+                    "maps_url": None, "is_offline": True,
+                    "timestamp": None,
+                }
+
+            import json
+            data_str = json.dumps(payload)
+            if data_str != last_payload:
+                last_payload = data_str
+                yield "data: {}\n\n".format(data_str)
+            else:
+                yield ": heartbeat\n\n"   # keep connection alive
+
+            time.sleep(2)
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+
+
+# ── COMPREHENSIVE LIVE STREAM: sensors + alerts + pending reports ───────────────
+@iot_bp.route("/live", methods=["GET"])
+def live_stream():
+    """
+    All-in-one SSE endpoint. Streams a combined snapshot every 3 seconds.
+    Clients receive one JSON object with:
+      sensors[]        — all sensors with latest readings
+      active_alerts[]  — latest 10 active alerts
+      pending_count    — number of unverified citizen reports
+      thresholds       — current advisory/warning/critical thresholds
+    """
+    def generate():
+        import json
+        last_payload = None
+        while True:
+            try:
+                db = get_db()
+                cur = db.cursor(dictionary=True)
+
+                # All sensors with latest readings
+                cur.execute("""
+                    SELECT s.id, s.name, s.barangay, s.lat, s.lng,
+                           s.status as sensor_status, s.battery_level, s.signal_strength,
+                           r.flood_level, r.raw_distance, r.status as reading_status,
+                           r.latitude, r.longitude, r.maps_url, r.created_at
+                    FROM sensors s
+                    LEFT JOIN iot_readings r ON r.sensor_id = s.id
+                        AND r.created_at = (
+                            SELECT MAX(r2.created_at) FROM iot_readings r2
+                            WHERE r2.sensor_id = s.id
+                        )
+                """)
+                sensors_raw = cur.fetchall()
+
+                sensors = []
+                for s in sensors_raw:
+                    created_at = s.get("created_at")
+                    if isinstance(created_at, datetime):
+                        age = (datetime.now() - created_at).total_seconds()
+                    else:
+                        age = 9999
+                    is_disabled = s.get("sensor_status") == "inactive"
+                    is_offline  = is_disabled or (age > 30)
+                    sensors.append({
+                        "id":           s["id"],
+                        "name":         s["name"],
+                        "barangay":     s["barangay"],
+                        "lat":          float(s["lat"]) if s["lat"] else 0,
+                        "lng":          float(s["lng"]) if s["lng"] else 0,
+                        "flood_level":  float(s["flood_level"] or 0),
+                        "raw_distance": float(s["raw_distance"] or 0),
+                        "status":       "OFFLINE" if is_offline else (s["reading_status"] or "NORMAL"),
+                        "is_offline":   is_offline,
+                        "battery_level":   s.get("battery_level"),
+                        "signal_strength": s.get("signal_strength"),
+                        "latitude":     float(s["latitude"]) if s.get("latitude") else None,
+                        "longitude":    float(s["longitude"]) if s.get("longitude") else None,
+                        "maps_url":     s.get("maps_url"),
+                        "last_seen":    created_at.isoformat() if isinstance(created_at, datetime) else None,
+                    })
+
+                # Active alerts (latest 10)
+                cur.execute("""
+                    SELECT id, title, description, barangay, level, status, created_at,
+                           recommended_action, incident_status
+                    FROM alerts
+                    WHERE status = 'active'
+                    ORDER BY created_at DESC LIMIT 10
+                """)
+                alerts_raw = cur.fetchall()
+                active_alerts = []
+                for a in alerts_raw:
+                    a["created_at"] = a["created_at"].isoformat() if isinstance(a.get("created_at"), datetime) else str(a.get("created_at", ""))
+                    active_alerts.append(a)
+
+                # Pending citizen reports count
+                cur.execute("SELECT COUNT(*) as cnt FROM reports WHERE status = 'pending'")
+                row = cur.fetchone()
+                pending_count = row["cnt"] if row else 0
+
+                cur.close()
+
+                _sync_thresholds_from_db()
+                payload = {
+                    "sensors":       sensors,
+                    "active_alerts": active_alerts,
+                    "pending_count": pending_count,
+                    "thresholds":    dict(_thresholds),
+                }
+
+                data_str = json.dumps(payload, default=str)
+                if data_str != last_payload:
+                    last_payload = data_str
+                    yield "data: {}\n\n".format(data_str)
+                else:
+                    yield ": heartbeat\n\n"
+
+            except Exception as e:
+                yield ": error {}\n\n".format(str(e))
+
+            time.sleep(3)
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )

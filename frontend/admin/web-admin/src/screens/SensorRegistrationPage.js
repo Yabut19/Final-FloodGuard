@@ -161,7 +161,38 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
         fetchSensors();
         fetchHealthData();
         healthIntervalRef.current = setInterval(fetchHealthData, 10000);
-        return () => clearInterval(healthIntervalRef.current);
+
+        let es;
+        if (typeof EventSource !== "undefined") {
+            const connect = () => {
+                es = new EventSource(`${API_BASE_URL}/api/iot/live`);
+                es.onmessage = (e) => {
+                    try {
+                        const d = JSON.parse(e.data);
+                        if (d.sensors) {
+                            setLiveSensors(prev => prev.map(s => {
+                                const live = d.sensors.find(ls => ls.id === s.id);
+                                if (!live) return s;
+                                return {
+                                    ...s,
+                                    flood_level: Number(live.flood_level || 0),
+                                    raw_distance: Number(live.raw_distance || 0),
+                                    reading_status: live.status || s.reading_status,
+                                    is_offline: live.is_offline,
+                                };
+                            }));
+                        }
+                    } catch (_) {}
+                };
+                es.onerror = () => { es.close(); setTimeout(connect, 3000); };
+            };
+            connect();
+        }
+
+        return () => {
+            clearInterval(healthIntervalRef.current);
+            if (es) es.close();
+        };
     }, []);
 
     // ── Animation for blinking dots ───────────────────────────────
@@ -772,6 +803,9 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                             <Text style={{ fontSize: 12, color: isOff ? "#64748b" : "#3b82f6", fontFamily: "Poppins_700Bold", letterSpacing: 1 }}>CURRENT FLOOD LEVEL</Text>
                                             <Text style={{ fontSize: 44, color: isOff ? "#94a3b8" : "#1e40af", fontFamily: "Poppins_800ExtraBold", marginVertical: 4 }}>
                                                 {isOff ? "—" : `${Number(sh.live?.flood_level || 0).toFixed(1)} cm`}
+                                            </Text>
+                                            <Text style={{ fontSize: 12, color: "#64748b", fontFamily: "Poppins_400Regular", marginBottom: 6 }}>
+                                                {isOff ? "Raw: —" : `Raw dist: ${Number(sh.live?.raw_distance || 0).toFixed(1)} cm`}
                                             </Text>
                                             <View style={{ backgroundColor: st.bg, paddingHorizontal: 16, paddingVertical: 4, borderRadius: 16, borderWidth: 1, borderColor: st.border }}>
                                                 <Text style={{ fontSize: 12, fontFamily: "Poppins_700Bold", color: st.text }}>{reading_st.charAt(0).toUpperCase() + reading_st.slice(1).toLowerCase()}</Text>

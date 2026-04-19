@@ -193,6 +193,21 @@ CREATE TABLE IF NOT EXISTS `user_alert_dismissals` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- System configuration (thresholds, etc.)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `system_config` (
+  `config_key`   varchar(100) NOT NULL,
+  `config_value` varchar(500) NOT NULL,
+  PRIMARY KEY (`config_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO `system_config` (`config_key`, `config_value`) VALUES
+  ('advisory_level', '10'),
+  ('warning_level',  '15'),
+  ('critical_level', '25')
+ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Seed data — default admin accounts
 -- Default password for admin@system.com : admin123
 -- Default password for moderator@lgu.gov: password123

@@ -160,7 +160,7 @@ const WaterWave = ({ color, isOffline }) => {
 // ── Each card is its own component with its own Animated state ───────────────
 const SensorCard = ({ sensor, isLast }) => {
     const isOffline = (sensor.status || '').toUpperCase() === 'OFFLINE';
-    const maxLevel = 100;
+    const maxLevel = 50;
     const targetFill = isOffline ? 0 : Math.min((Number(sensor.waterLevel) / maxLevel) * 100, 100);
     const color = getStatusColor(sensor.status);
 
@@ -215,16 +215,16 @@ const SensorCard = ({ sensor, isLast }) => {
                     {/* Scale Markers */}
                     <View style={styles.sensorPillMarkers}>
                         <View style={styles.sensorPillMarkerLine}>
-                            <Text style={styles.sensorPillMarkerText}>100cm</Text>
-                        </View>
-                        <View style={styles.sensorPillMarkerLine}>
-                            <Text style={styles.sensorPillMarkerText}>75cm</Text>
-                        </View>
-                        <View style={styles.sensorPillMarkerLine}>
                             <Text style={styles.sensorPillMarkerText}>50cm</Text>
                         </View>
                         <View style={styles.sensorPillMarkerLine}>
+                            <Text style={styles.sensorPillMarkerText}>37cm</Text>
+                        </View>
+                        <View style={styles.sensorPillMarkerLine}>
                             <Text style={styles.sensorPillMarkerText}>25cm</Text>
+                        </View>
+                        <View style={styles.sensorPillMarkerLine}>
+                            <Text style={styles.sensorPillMarkerText}>12cm</Text>
                         </View>
                     </View>
                 </View>
@@ -238,10 +238,16 @@ const SensorCard = ({ sensor, isLast }) => {
                     </Text>
                 ) : (
                     <Text style={styles.sensorCardValueLabel}>
-                        {Number(sensor.waterLevel).toFixed(2)}
+                        {Number(sensor.waterLevel).toFixed(1)}
                         <Text style={styles.sensorCardValueUnit}>cm</Text>
                     </Text>
                 )}
+                {/* Raw distance — lets you verify the IoT device is sending data */}
+                <Text style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'Poppins_400Regular', marginTop: 2 }}>
+                    {isOffline
+                        ? 'Raw: —'
+                        : `Raw dist: ${Number(sensor.rawDistance || 0).toFixed(1)} cm`}
+                </Text>
                 <View style={[styles.sensorCardBadge, { backgroundColor: getStatusBgColor(sensor.status) }]}>
                     <Text style={[styles.sensorCardBadgeText, { color: getStatusColor(sensor.status) }]}>
                         {isOffline ? 'SENSOR OFFLINE' : (sensor.status || '').toUpperCase()}

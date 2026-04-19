@@ -1984,7 +1984,7 @@ const DashboardScreen = ({ navigation }) => {
     };
 
     fetchLatest();
-    const id = setInterval(fetchLatest, 5000);
+    const id = setInterval(fetchLatest, 3000);
     return () => clearInterval(id);
   }, []);
 
@@ -2059,14 +2059,14 @@ const DashboardScreen = ({ navigation }) => {
               <View style={styles.gaugeCapsule}>
                 <WaterWave
                   color={getStatusColor(latestSensor?.status || "UNKNOWN")}
-                  fillPercentage={latestSensor ? Math.max(0, Math.min(100, latestSensor.flood_level || 0)) : 0}
+                  fillPercentage={latestSensor ? Math.max(0, Math.min(100, ((latestSensor.flood_level || 0) / 50) * 100)) : 0}
                 />
 
-                {/* Level Markers */}
-                {[4, 3, 2, 1].map((level, i) => (
+                {/* Level Markers — 50 cm max */}
+                {[50, 37, 25, 12].map((level, i) => (
                   <React.Fragment key={level}>
                     <View style={[styles.gaugeLevelMark, { top: `${20 * (i + 1)}%` }]}>
-                      <Text style={styles.gaugeMarkText}>{level}m</Text>
+                      <Text style={styles.gaugeMarkText}>{level}cm</Text>
                     </View>
                     <View style={[styles.gaugeLevelDivider, { top: `${20 * (i + 1)}%` }]} />
                   </React.Fragment>
@@ -2093,7 +2093,7 @@ const DashboardScreen = ({ navigation }) => {
           <View style={styles.sensorCardFooter}>
             <View style={styles.footerInfoItem}>
               <Feather name="info" size={14} color="#64748b" />
-              <Text style={styles.thresholdText}>Normal Range: <Text style={styles.thresholdTextBold}>3–100cm</Text></Text>
+              <Text style={styles.thresholdText}>Sensor Max Range: <Text style={styles.thresholdTextBold}>50 cm</Text></Text>
             </View>
             <Text style={styles.sensorIdText}>STATION ID: {latestSensor?.sensor_id || "sensor-1"}</Text>
           </View>
@@ -2139,7 +2139,7 @@ const MapScreen = ({ navigation, route }) => {
 
   useEffect(() => {
     fetchSensorData();
-    const interval = setInterval(fetchSensorData, 5000);
+    const interval = setInterval(fetchSensorData, 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -2283,7 +2283,7 @@ const AlertsScreen = ({ navigation }) => {
 
   useEffect(() => {
     fetchAlerts();
-    const interval = setInterval(fetchAlerts, 30000);
+    const interval = setInterval(fetchAlerts, 5000);
     return () => clearInterval(interval);
   }, []);
 

@@ -31,10 +31,11 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 barangay: s.barangay || "Active Area",
                 latitude: s.lat || MABOLO_REGION.latitude,
                 longitude: s.lng || MABOLO_REGION.longitude,
-                status: s.reading_status?.toLowerCase() || s.status.toLowerCase(),
+                status: s.is_offline ? "offline" : (s.reading_status?.toLowerCase() || "normal"),
                 risk_level: (s.reading_status || "").toLowerCase() === "normal" ? "low" :
                     (s.reading_status || "").toLowerCase() === "warning" ? "elevated" : "high",
-                flood_level: s.flood_level || 0,
+                flood_level: Number(s.flood_level || 0),
+                raw_distance: Number(s.raw_distance || 0),
                 last_updated: s.last_seen ? new Date(s.last_seen).toLocaleString() : "No data",
                 is_offline: s.is_offline
             }));
@@ -47,11 +48,42 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
         }
     };
 
-    // Fetch data on component mount and set up polling
+    // Fetch data on mount + SSE for live sensor level updates
     useEffect(() => {
         fetchSensorData();
-        const interval = setInterval(fetchSensorData, 5000); // Update every 5 seconds
-        return () => clearInterval(interval);
+        const interval = setInterval(fetchSensorData, 10000); // full refresh every 10 s
+
+        let es;
+        if (typeof EventSource !== "undefined") {
+            const connect = () => {
+                es = new EventSource(`${API_BASE_URL}/api/iot/live`);
+                es.onmessage = (e) => {
+                    try {
+                        const d = JSON.parse(e.data);
+                        if (d.sensors) {
+                            setSensorData(prev => prev.map(s => {
+                                const live = d.sensors.find(ls => ls.id === s.sensor_id);
+                                if (!live) return s;
+                                return {
+                                    ...s,
+                                    flood_level: Number(live.flood_level || 0),
+                                    raw_distance: Number(live.raw_distance || 0),
+                                    status: live.is_offline ? "offline" : (live.status?.toLowerCase() || "normal"),
+                                    is_offline: live.is_offline,
+                                };
+                            }));
+                        }
+                    } catch (_) {}
+                };
+                es.onerror = () => { es.close(); setTimeout(connect, 3000); };
+            };
+            connect();
+        }
+
+        return () => {
+            clearInterval(interval);
+            if (es) es.close();
+        };
     }, []);
 
     // ── Animation for blinking dots ───────────────────────────────

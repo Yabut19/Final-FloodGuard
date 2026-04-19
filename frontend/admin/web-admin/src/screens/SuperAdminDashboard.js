@@ -23,7 +23,45 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
         }
         fetchAll();
         refreshRef.current = setInterval(fetchAll, 15000);
-        return () => clearInterval(refreshRef.current);
+
+        let es;
+        if (typeof EventSource !== "undefined") {
+            const connect = () => {
+                es = new EventSource(`${API_BASE_URL}/api/iot/live`);
+                es.onmessage = (e) => {
+                    try {
+                        const d = JSON.parse(e.data);
+                        if (d.sensors) {
+                            setLiveSensors(d.sensors.map(s => ({
+                                id: s.id, name: s.name, location: s.barangay,
+                                waterLevel: s.flood_level,
+                                rawDistance: s.raw_distance || 0,
+                                status: s.is_offline ? "OFFLINE" : (s.status || "NORMAL"),
+                                battery: s.battery_level, signal: s.signal_strength,
+                            })));
+                        }
+                        if (d.active_alerts) setRecentAlerts(d.active_alerts.slice(0, 5));
+                        if (d.sensors) {
+                            setStats(prev => ({
+                                ...prev,
+                                active_alerts: d.active_alerts ? d.active_alerts.length : prev.active_alerts,
+                                active_sensors: d.sensors.filter(s => !s.is_offline).length,
+                                avg_water_level: d.sensors.length
+                                    ? d.sensors.reduce((acc, s) => acc + (s.flood_level || 0), 0) / d.sensors.length
+                                    : prev.avg_water_level,
+                            }));
+                        }
+                    } catch (_) {}
+                };
+                es.onerror = () => { es.close(); setTimeout(connect, 3000); };
+            };
+            connect();
+        }
+
+        return () => {
+            clearInterval(refreshRef.current);
+            if (es) es.close();
+        };
     }, []);
 
     const fetchAll = async () => {
@@ -56,6 +94,7 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
             setLiveSensors(data.map(s => ({
                 id: s.id, name: s.name, location: s.barangay,
                 waterLevel: s.flood_level,
+                rawDistance: s.raw_distance || 0,
                 status: s.is_offline ? "OFFLINE" : (s.reading_status || "NORMAL"),
                 battery: s.battery_level, signal: s.signal_strength,
             })));

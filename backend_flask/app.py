@@ -57,4 +57,4 @@ if __name__ == '__main__':
     # Use 'flask run' in production or gunicorn.
     import os
     debug_mode = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
-    app.run(debug=debug_mode, host='0.0.0.0', port=5000)
+    app.run(debug=debug_mode, host='0.0.0.0', port=5000, threaded=True)

@@ -47,8 +47,24 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
 
     useEffect(() => {
         fetchData();
-        const interval = setInterval(fetchData, 10000); // Refresh every 10 seconds
-        return () => clearInterval(interval);
+        const interval = setInterval(fetchData, 5000);
+
+        let es;
+        if (typeof EventSource !== "undefined") {
+            es = new EventSource(`${API_BASE}/api/iot/stream`);
+            es.onmessage = (e) => {
+                try {
+                    const d = JSON.parse(e.data);
+                    setSensorData(prev => prev ? { ...prev, ...d } : d);
+                } catch (_) {}
+            };
+            es.onerror = () => es.close();
+        }
+
+        return () => {
+            clearInterval(interval);
+            if (es) es.close();
+        };
     }, []);
 
     const handleVerify = async () => {

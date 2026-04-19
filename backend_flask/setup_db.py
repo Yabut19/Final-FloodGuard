@@ -11,17 +11,29 @@ def get_db_connection():
     )
 
 def run_migrations(conn=None, cursor=None):
-    """Add any columns that are in the schema but missing from the live DB."""
+    """Add any columns/tables that are in the schema but missing from the live DB."""
     _owns_conn = conn is None
     if _owns_conn:
         conn = get_db_connection()
         cursor = conn.cursor()
 
+    # Ensure system_config table exists (used by ThresholdConfigPage)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS `system_config` (
+            `config_key`   VARCHAR(100) NOT NULL,
+            `config_value` VARCHAR(500) NOT NULL,
+            PRIMARY KEY (`config_key`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """)
+    conn.commit()
+    print("  [migration] `system_config` table ensured")
+
     required_columns = [
-        ("reports", "recommendations",   "TEXT DEFAULT NULL"),
-        ("reports", "report_status",     "VARCHAR(100) DEFAULT NULL"),
-        ("alerts",  "recommended_action","VARCHAR(500) DEFAULT NULL"),
-        ("alerts",  "incident_status",   "VARCHAR(100) DEFAULT 'Active'"),
+        ("reports",      "recommendations",    "TEXT DEFAULT NULL"),
+        ("reports",      "report_status",      "VARCHAR(100) DEFAULT NULL"),
+        ("alerts",       "recommended_action", "VARCHAR(500) DEFAULT NULL"),
+        ("alerts",       "incident_status",    "VARCHAR(100) DEFAULT 'Active'"),
+        ("iot_readings", "raw_distance",       "DECIMAL(10,2) DEFAULT NULL"),
     ]
 
     for table, column, col_def in required_columns:
