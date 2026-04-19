@@ -82,7 +82,7 @@ const ACCOUNT_IMAGE = require("./assets/flood.png");
 const LOCATION_IMAGE = require("./assets/flood4.jpg");
 const NOTIFY_IMAGE = require("./assets/flood5.jpg");
 const LOGO = require("./assets/logo.png");
-const API_BASE = "http://192.168.68.101:5000"; // Updated to current machine IP (192.168.68.101)
+const API_BASE = "http://192.168.68.104:5000"; // Updated to current machine IP (172.16.17.33)
 
 const safeGoBack = (navigation, fallback) => {
   if (navigation?.canGoBack?.()) {
