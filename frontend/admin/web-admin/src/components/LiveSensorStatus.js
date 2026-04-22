@@ -8,14 +8,14 @@ const getStatusColor = (status) => {
     switch ((status || '').toUpperCase()) {
         case 'NORMAL':
         case 'SAFE':
-            return '#4ade80';
+            return '#22c55e'; // Green
         case 'ADVISORY':
-            return '#fbbf24';
+            return '#3b82f6'; // Blue
         case 'WARNING':
-            return '#f97316';
+            return '#f97316'; // Orange
         case 'ALARM':
         case 'CRITICAL':
-            return '#ef4444';
+            return '#dc2626'; // Red
         case 'OFFLINE':
             return '#94a3b8';
         default:
@@ -27,14 +27,14 @@ const getStatusBgColor = (status) => {
     switch ((status || '').toUpperCase()) {
         case 'NORMAL':
         case 'SAFE':
-            return 'rgba(74, 222, 128, 0.15)';
+            return 'rgba(34, 197, 94, 0.15)';
         case 'ADVISORY':
-            return 'rgba(251, 191, 36, 0.15)';
+            return 'rgba(59, 130, 246, 0.15)';
         case 'WARNING':
             return 'rgba(249, 115, 22, 0.15)';
         case 'ALARM':
         case 'CRITICAL':
-            return 'rgba(239, 68, 68, 0.15)';
+            return 'rgba(220, 38, 38, 0.15)';
         case 'OFFLINE':
             return 'rgba(148, 163, 184, 0.15)';
         default:
@@ -160,9 +160,20 @@ const WaterWave = ({ color, isOffline }) => {
 // ── Each card is its own component with its own Animated state ───────────────
 const SensorCard = ({ sensor, isLast, thresholds }) => {
     const isOffline = (sensor.status || '').toUpperCase() === 'OFFLINE';
+    
+    const getLiveStatus = () => {
+        if (isOffline) return "OFFLINE";
+        const lvl = Number(sensor.waterLevel || 0);
+        if (lvl >= (thresholds?.critical_level || 50)) return "CRITICAL";
+        if (lvl >= (thresholds?.warning_level || 30)) return "WARNING";
+        if (lvl >= (thresholds?.advisory_level || 15)) return "ADVISORY";
+        return "NORMAL";
+    };
+
+    const liveStatus = getLiveStatus();
     const maxLevel = thresholds?.critical_level || 50;
     const targetFill = isOffline ? 0 : Math.min((Number(sensor.waterLevel) / maxLevel) * 100, 100);
-    const color = getStatusColor(sensor.status);
+    const color = getStatusColor(liveStatus);
 
     // Smooth animated height — prevents flicker on 1s refresh
     const animFill = React.useRef(new Animated.Value(targetFill)).current;
@@ -248,9 +259,9 @@ const SensorCard = ({ sensor, isLast, thresholds }) => {
                         ? 'Raw: 0.0 cm'
                         : `Raw dist: ${Number(sensor.rawDistance || 0).toFixed(1)} cm`}
                 </Text>
-                <View style={[styles.sensorCardBadge, { backgroundColor: getStatusBgColor(sensor.status) }]}>
-                    <Text style={[styles.sensorCardBadgeText, { color: getStatusColor(sensor.status) }]}>
-                        {isOffline ? 'SENSOR OFFLINE' : (sensor.status || '').toUpperCase()}
+                <View style={[styles.sensorCardBadge, { backgroundColor: getStatusBgColor(liveStatus) }]}>
+                    <Text style={[styles.sensorCardBadgeText, { color: getStatusColor(liveStatus) }]}>
+                        {isOffline ? 'SENSOR OFFLINE' : liveStatus.toUpperCase()}
                     </Text>
                 </View>
             </View>

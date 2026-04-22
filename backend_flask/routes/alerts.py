@@ -89,7 +89,7 @@ def get_alerts():
     db = get_db()
     cursor = db.cursor(dictionary=True)
     
-    status = request.args.get('status') # active, resolved
+    status = request.args.get('status') # e.g. active
     user_id = request.args.get('user_id')  # Optional: filter out dismissed alerts for this user
     
     # Start with base query
@@ -141,20 +141,27 @@ def create_alert():
     data = request.get_json()
     title = data.get('title')
     description = data.get('description')
-    level = data.get('level') # advisory, warning, critical
+    level = data.get('level') # advisory, warning, critical, evacuation
     barangay = data.get('barangay', 'All')
     recommended_action = data.get('recommended_action', '')
+    source = data.get('source', 'manual')
+    evacuation_status = data.get('evacuation_status', 'open') if level == 'evacuation' else None
+    evacuation_location = data.get('evacuation_location') if level == 'evacuation' else None
+    evacuation_capacity = data.get('evacuation_capacity') if level == 'evacuation' else None
     
     if not title or not level:
         return jsonify({"error": "Title and level are required"}), 400
+    
+    if level.lower() not in ['advisory', 'warning', 'critical', 'evacuation']:
+        return jsonify({"error": "Invalid alert level. Only Advisory, Warning, Critical, and Evacuation are allowed."}), 400
         
     db = get_db()
     cursor = db.cursor()
     
     cursor.execute("""
-        INSERT INTO alerts (title, description, level, barangay, recommended_action, status, timestamp)
-        VALUES (%s, %s, %s, %s, %s, 'active', NOW())
-    """, (title, description, level, barangay, recommended_action))
+        INSERT INTO alerts (title, description, level, barangay, recommended_action, status, source, evacuation_status, evacuation_location, evacuation_capacity, timestamp)
+        VALUES (%s, %s, %s, %s, %s, 'active', %s, %s, %s, %s, NOW())
+    """, (title, description, level, barangay, recommended_action, source, evacuation_status, evacuation_location, evacuation_capacity))
     
     db.commit()
     alert_id = cursor.lastrowid
@@ -163,15 +170,35 @@ def create_alert():
     # ── REAL-TIME BROADCAST: Deliver instantly to mobile apps (latency < 200ms) ──
     try:
         from app import socketio
-        socketio.emit("new_notification", {
-            "type": "alert",
-            "id": alert_id,
-            "title": title,
-            "description": description,
-            "level": level,
-            "barangay": barangay,
-            "timestamp": datetime.now().isoformat()
-        }, namespace="/")
+        
+        # Point 4: Mobile App Notification Rules (Evacuation Alerts)
+        if level == 'evacuation':
+            notification_payload = {
+                "type": "alert",
+                "id": alert_id,
+                "title": title,
+                "description": description,
+                "level": level,
+                "barangay": barangay,
+                "evacuation_status": evacuation_status,
+                "evacuation_location": evacuation_location,
+                "evacuation_capacity": evacuation_capacity,
+                "timestamp": datetime.now().isoformat()
+                # DO NOT include recommended_action or incident_status for evacuation
+            }
+        else:
+            notification_payload = {
+                "type": "alert",
+                "id": alert_id,
+                "title": title,
+                "description": description,
+                "level": level,
+                "barangay": barangay,
+                "recommended_action": recommended_action,
+                "timestamp": datetime.now().isoformat()
+            }
+
+        socketio.emit("new_notification", notification_payload, namespace="/")
     except Exception as ws_err:
         logger.warning(f"WebSocket broadcast failed: {ws_err}")
 

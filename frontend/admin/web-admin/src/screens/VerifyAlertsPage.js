@@ -144,13 +144,13 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
         switch (level?.toLowerCase()) {
             case "ankle-high":
             case "low":
-                return "#16a34a";
+                return "#3b82f6"; // Blue
             case "waist-high":
             case "medium":
-                return "#f59e0b";
+                return "#f97316"; // Orange
             case "chest-high":
             case "high":
-                return "#ef4444";
+                return "#dc2626"; // Red
             default:
                 return "#64748b";
         }
@@ -161,9 +161,10 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
             case "NORMAL":
                 return "#16a34a";
             case "WARNING":
-                return "#f59e0b";
+                return "#f97316"; // Orange
             case "ALARM":
-                return "#ef4444";
+            case "CRITICAL":
+                return "#dc2626"; // Red
             default:
                 return "#64748b";
         }
@@ -179,9 +180,9 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
         if (distance < 0.5 && selectedReport.type?.toLowerCase().includes("flood")) {
             return { text: "✓ MATCHING", color: "#16a34a", desc: "Report aligns with sensor data" };
         } else if (distance < 2) {
-            return { text: "≈ NEARBY", color: "#f59e0b", desc: "Report location is near sensor" };
+            return { text: "≈ NEARBY", color: "#f97316", desc: "Report location is near sensor" };
         } else {
-            return { text: "∝ DISTANT", color: "#ef4444", desc: "Report location is far from sensor" };
+            return { text: "∝ DISTANT", color: "#dc2626", desc: "Report location is far from sensor" };
         }
     };
 
@@ -200,8 +201,8 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                     </View>
                     <View style={styles.dashboardTopRight}>
                         <View style={[styles.dashboardStatusPill, { backgroundColor: "rgba(249, 115, 22, 0.15)" }]}>
-                            <View style={[styles.dashboardStatusDot, { backgroundColor: "#f59e0b" }]} />
-                            <Text style={[styles.dashboardStatusText, { color: "#f59e0b" }]}>
+                            <View style={[styles.dashboardStatusDot, { backgroundColor: "#f97316" }]} />
+                            <Text style={[styles.dashboardStatusText, { color: "#ea580c" }]}>
                                 {pendingReports.length} Pending
                             </Text>
                         </View>
@@ -319,7 +320,7 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                                         {
                                             marginBottom: 12,
                                             borderLeftWidth: 6,
-                                            borderLeftColor: "#f59e0b",
+                                            borderLeftColor: "#f97316",
                                             flexDirection: width > 1024 ? "row" : "column",
                                         },
                                     ]}
@@ -339,7 +340,7 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                                         <View style={{ marginBottom: 12 }}>
                                             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
                                                 <View>
-                                                    <Text style={{ fontSize: 11, color: "#f59e0b", fontFamily: "Poppins_700Bold", letterSpacing: 0.5 }}>
+                                                    <Text style={{ fontSize: 11, color: "#f97316", fontFamily: "Poppins_700Bold", letterSpacing: 0.5 }}>
                                                         {report.type?.toUpperCase()}
                                                     </Text>
                                                     <Text style={{ fontSize: 16, color: "#0f172a", fontFamily: "Poppins_700Bold", marginTop: 4 }}>
@@ -354,7 +355,7 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                                                         borderRadius: 999,
                                                     }}
                                                 >
-                                                    <Text style={{ color: "#92400e", fontFamily: "Poppins_700Bold", fontSize: 10, letterSpacing: 0.4 }}>
+                                                    <Text style={{ color: "#ea580c", fontFamily: "Poppins_700Bold", fontSize: 10, letterSpacing: 0.4 }}>
                                                         PENDING
                                                     </Text>
                                                 </View>
@@ -535,7 +536,7 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                                         <Text style={{ fontSize: 12, color: "#94a3b8", fontFamily: "Poppins_700Bold", letterSpacing: 1, marginBottom: 12 }}>
                                             📝 USER REPORT
                                         </Text>
-                                        <View style={[styles.dashboardPanel, { marginTop: 0, borderLeftWidth: 6, borderLeftColor: "#f59e0b" }]}>
+                                        <View style={[styles.dashboardPanel, { marginTop: 0, borderLeftWidth: 6, borderLeftColor: "#f97316" }]}>
                                             <Text style={{ fontSize: 14, color: "#0f172a", fontFamily: "Poppins_700Bold", marginBottom: 4 }}>
                                                 {selectedReport.type} at {selectedReport.location}
                                             </Text>
@@ -659,9 +660,9 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                                             </Text>
                                             <View style={{ flexDirection: "row", gap: 8 }}>
                                                 {[
-                                                    { level: "low", label: "Low", color: "#16a34a" },
-                                                    { level: "medium", label: "Medium", color: "#f59e0b" },
-                                                    { level: "high", label: "High", color: "#ef4444" },
+                                                    { level: "low", label: "Low", color: "#3b82f6" },
+                                                    { level: "medium", label: "Medium", color: "#f97316" },
+                                                    { level: "high", label: "High", color: "#dc2626" },
                                                 ].map(({ level, label, color }) => (
                                                     <TouchableOpacity
                                                         key={level}
@@ -696,7 +697,7 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                                                 Incident Status:
                                             </Text>
                                             <View style={{ flexDirection: "row", gap: 8 }}>
-                                                {["Active", "Resolved"].map((status) => (
+                                                {["Active"].map((status) => (
                                                     <TouchableOpacity
                                                         key={status}
                                                         onPress={() => setIncidentStatus(status)}
@@ -705,15 +706,15 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                                                             paddingVertical: 10,
                                                             borderRadius: 8,
                                                             alignItems: "center",
-                                                            backgroundColor: incidentStatus === status ? "#3b82f620" : "#f1f5f9",
-                                                            borderWidth: incidentStatus === status ? 2 : 1,
-                                                            borderColor: incidentStatus === status ? "#3b82f6" : "#DDF6D2",
+                                                            backgroundColor: "#3b82f620",
+                                                            borderWidth: 2,
+                                                            borderColor: "#3b82f6",
                                                         }}
                                                     >
                                                         <Text
                                                             style={{
-                                                                color: incidentStatus === status ? "#3b82f6" : "#94a3b8",
-                                                                fontFamily: incidentStatus === status ? "Poppins_700Bold" : "Poppins_600SemiBold",
+                                                                color: "#3b82f6",
+                                                                fontFamily: "Poppins_700Bold",
                                                                 fontSize: 12,
                                                             }}
                                                         >

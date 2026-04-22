@@ -83,7 +83,8 @@ def on_connect():
             
             if hasattr(row["created_at"], "isoformat"):
                 row["timestamp"] = row["created_at"].isoformat()
-            
+            from utils.thresholds import calculate_status
+            row["status"] = calculate_status(row["flood_level"])
             socketio.emit("sensor_update", row)
         db.close()
     except Exception as e:

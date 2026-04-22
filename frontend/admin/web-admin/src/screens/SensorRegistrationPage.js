@@ -323,8 +323,8 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             maintenance: { bg: "#fef3c7", text: "#92400e", border: "#fcd34d" },
             OFFLINE: { bg: "#f1f5f9", text: "#64748b", border: "#cbd5e1" },
             NORMAL: { bg: "#dcfce7", text: "#166534", border: "#86efac" },
-            WARNING: { bg: "#fef3c7", text: "#92400e", border: "#fcd34d" },
-            CRITICAL: { bg: "#fee2e2", text: "#dc2626", border: "#fca5a5" },
+            WARNING: { bg: "#fff7ed", text: "#ea580c", border: "#fed7aa" },
+            CRITICAL: { bg: "#fef2f2", text: "#dc2626", border: "#fca5a5" },
         };
         return map[status] || { bg: "#f1f5f9", text: "#64748b", border: "#e2e8f0" };
     };
@@ -956,7 +956,7 @@ const pg = StyleSheet.create({
     // Shared badge
     badge: { borderRadius: 16, borderWidth: 1, paddingVertical: 4, paddingHorizontal: 8, alignSelf: "flex-start" },
     badgeText: { fontSize: 11, fontFamily: "Poppins_600SemiBold" },
-    deleteBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: "#fee2e2", alignItems: "center", justifyContent: "center" },
+    deleteBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#e2e8f0", alignItems: "center", justifyContent: "center" },
     // Empty state
     emptyState: { alignItems: "center", paddingVertical: 64 },
     emptyIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: "#f1f5f9", alignItems: "center", justifyContent: "center", marginBottom: 16 },

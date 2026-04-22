@@ -41,9 +41,9 @@ def create_evacuation_center():
         alert_title = f"New Evacuation Center: {name}"
         alert_description = f"{name} in {location} is now available for residents. Capacity: {capacity}."
         cursor.execute("""
-            INSERT INTO alerts (title, description, level, barangay, status)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (alert_title, alert_description, 'advisory', 'All', 'active'))
+            INSERT INTO alerts (title, description, level, barangay, status, evacuation_status, evacuation_location, evacuation_capacity, timestamp)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        """, (alert_title, alert_description, 'evacuation', 'All', 'active', 'open', location, capacity))
 
         db.commit()
         center_id = cursor.lastrowid
@@ -102,7 +102,28 @@ def update_evacuation_center(center_id):
         params.append(center_id)
         
         cursor.execute(query, tuple(params))
+        
+        # Trigger an alert if status or name/location changed significantly
+        if status or name or location or capacity is not None:
+            # Fetch current details to build the alert
+            cursor.execute("SELECT name, location, status, capacity FROM evacuation_centers WHERE id = %s", (center_id,))
+            c = cursor.fetchone()
+            if c:
+                alert_title = f"Evacuation Update: {c[0]}"
+                alert_description = f"Center {c[0]} status is now {c[2].upper()}. Location: {c[1]}."
+                cursor.execute("""
+                    INSERT INTO alerts (title, description, level, barangay, status, evacuation_status, evacuation_location, evacuation_capacity, timestamp)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                """, (alert_title, alert_description, 'evacuation', 'All', 'active', c[2], c[1], c[3]))
+
         db.commit()
+
+        # Broadcast the alert via WebSocket
+        try:
+            from app import socketio
+            socketio.emit("new_notification", {"type": "alert", "level": "evacuation"}, namespace="/")
+        except: pass
+
         return jsonify({"message": "Evacuation center updated successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500

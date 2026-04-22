@@ -153,8 +153,8 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
                                     <View style={styles.thresholdRow}>
                                         <View style={styles.thresholdLabelRow}>
                                             <Text style={styles.thresholdLabel}>Warning Level</Text>
-                                            <View style={[styles.thresholdBadge, { backgroundColor: "#fffbeb" }]}>
-                                                <Text style={[styles.thresholdBadgeText, { color: "#d97706" }]}>{warningLevel}cm</Text>
+                                            <View style={[styles.thresholdBadge, { backgroundColor: "#fff7ed", borderColor: "#fed7aa" }]}>
+                                                <Text style={[styles.thresholdBadgeText, { color: "#ea580c" }]}>{warningLevel}cm</Text>
                                             </View>
                                         </View>
                                         <TextInput
@@ -172,7 +172,7 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
                                     <View style={styles.thresholdRow}>
                                         <View style={styles.thresholdLabelRow}>
                                             <Text style={styles.thresholdLabel}>Critical Level</Text>
-                                            <View style={[styles.thresholdBadge, { backgroundColor: "#fef2f2" }]}>
+                                            <View style={[styles.thresholdBadge, { backgroundColor: "#fef2f2", borderColor: "#fecaca" }]}>
                                                 <Text style={[styles.thresholdBadgeText, { color: "#dc2626" }]}>{criticalLevel}cm</Text>
                                             </View>
                                         </View>
@@ -227,7 +227,7 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
 
                                     <View style={styles.visualRefContainer}>
                                         <LinearGradient
-                                            colors={['#ef4444', '#f97316', '#3b82f6']}
+                                            colors={['#dc2626', '#f97316', '#3b82f6']}
                                             style={styles.visualGradient}
                                             start={{ x: 0, y: 0 }}
                                             end={{ x: 0, y: 1 }}

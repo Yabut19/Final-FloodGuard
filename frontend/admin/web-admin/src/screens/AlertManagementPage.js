@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { View, Text, ScrollView, TouchableOpacity, TextInput, Alert, ActivityIndicator, Image, Modal, Animated } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { styles } from "../styles/globalStyles";
 import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
@@ -9,7 +9,6 @@ import { API_BASE_URL } from "../config/api";
 const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const [alertType, setAlertType] = useState("advisory");
     const [selectedBarangays, setSelectedBarangays] = useState([]);
-    const [alertMessage, setAlertMessage] = useState("");
     const [alertTitle, setAlertTitle] = useState("");
     const [recommendedAction, setRecommendedAction] = useState("");
     
@@ -18,6 +17,9 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const [incidentStatus, setIncidentStatus] = useState("");
     const [statusError, setStatusError] = useState(false);
     const [verifications, setVerifications] = useState([]);
+    const [filterType, setFilterType] = useState('All Alerts');
+    const [showFilterDropdown, setShowFilterDropdown] = useState(false);
+    const [evacuationStatus, setEvacuationStatus] = useState('open');
     const [allReports, setAllReports] = useState([]);
     const [alertHistory, setAlertHistory] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -29,8 +31,11 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const [activeAlerts, setActiveAlerts] = useState([]);
     const [loadingActiveAlerts, setLoadingActiveAlerts] = useState(true);
     const [escalatingId, setEscalatingId] = useState(null);
-    const [resolvingId, setResolvingId] = useState(null);
     const [deletingId, setDeletingId] = useState(null);
+    
+    // Alert Details Modal State
+    const [showAlertDetailsModal, setShowAlertDetailsModal] = useState(false);
+    const [selectedAlertForModal, setSelectedAlertForModal] = useState(null);
     
     // Delete Confirmation Modal State
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -159,28 +164,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
         }
     };
 
-    const handleResolveAlert = async (alertId) => {
-        setResolvingId(alertId);
-        try {
-            const response = await fetch(`${API_BASE_URL}/api/subscriptions/resolve/${alertId}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ resolved_by: 'admin' })
-            });
-            const data = await response.json();
-            if (response.ok) {
-                alert('✅ Alert resolved successfully.');
-                fetchActiveAlerts();
-                fetchAlertHistory();
-            } else {
-                alert(data.error || 'Failed to resolve alert.');
-            }
-        } catch (err) {
-            alert('Network error while resolving.');
-        } finally {
-            setResolvingId(null);
-        }
-    };
+
 
     const handleDeleteAlert = async (alertId, alertTitle) => {
         console.log("Delete button clicked for alert:", alertId, alertTitle);
@@ -335,8 +319,8 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     };
 
     const handleBroadcast = async () => {
-        if (!alertMessage || selectedBarangays.length === 0 || !alertTitle) {
-            alert("Please fill in all fields (Title, Message, Barangays)");
+        if (selectedBarangays.length === 0 || !alertTitle) {
+            alert("Please fill in all fields (Title, Barangays)");
             return;
         }
 
@@ -351,10 +335,12 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 },
                 body: JSON.stringify({
                     title: alertTitle,
-                    description: alertMessage,
+                    description: "", // Removed Dispatch Message
                     level: alertType,
                     barangay: barangayString,
-                    recommended_action: recommendedAction
+                    recommended_action: recommendedAction,
+                    source: 'manual',
+                    evacuation_status: evacuationStatus
                 }),
             });
 
@@ -404,7 +390,8 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                     flood_level: verifyFloodLevel,
                     recommendations: recommendedAction,
                     recommended_action: recommendedAction,
-                    report_status: incidentStatus
+                    report_status: incidentStatus,
+                    source: 'report'
                 })
             });
 
@@ -510,14 +497,72 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
         <View style={styles.ccOpsGrid}>
             {/* Mission Control: Active Alerts */}
             <View style={styles.ccOpsLeft}>
-                <View style={[styles.ccPanel, { flex: 1, marginBottom: 0, overflow: 'hidden' }]}>
-                    <View style={styles.ccPanelHeader}>
+                <View style={[styles.ccPanel, { flex: 1, marginBottom: 0, overflow: 'visible' }]}>
+                    <View style={[styles.ccPanelHeader, { zIndex: 1001 }]}>
                         <View>
                             <Text style={styles.ccPanelTitle}>Mission Control</Text>
                             <Text style={styles.ccPanelSubtitle}>Active emergency escalations</Text>
                         </View>
-                        <View style={{ backgroundColor: '#fee2e2', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 16 }}>
-                            <Text style={{ fontSize: 11, fontFamily: "Poppins_700Bold", color: '#b91c1c' }}>{activeAlerts.length} LIVE</Text>
+                        <View style={{ position: 'relative', zIndex: 1000 }}>
+                            <TouchableOpacity 
+                                style={{ 
+                                    flexDirection: 'row', 
+                                    alignItems: 'center', 
+                                    gap: 8, 
+                                    backgroundColor: '#f1f5f9', 
+                                    paddingHorizontal: 12, 
+                                    paddingVertical: 6, 
+                                    borderRadius: 8,
+                                    borderWidth: 1,
+                                    borderColor: '#e2e8f0'
+                                }}
+                                onPress={() => setShowFilterDropdown(!showFilterDropdown)}
+                            >
+                                <Feather name="filter" size={14} color="#475569" />
+                                <Text style={{ fontSize: 12, fontFamily: "Poppins_600SemiBold", color: '#475569' }}>{filterType}</Text>
+                                <Feather name={showFilterDropdown ? "chevron-up" : "chevron-down"} size={14} color="#475569" />
+                            </TouchableOpacity>
+
+                            {showFilterDropdown && (
+                                <View style={{ 
+                                    position: 'absolute', 
+                                    top: 38, 
+                                    right: 0, 
+                                    backgroundColor: '#ffffff', 
+                                    borderRadius: 12, 
+                                    width: 160, 
+                                    shadowColor: '#000', 
+                                    shadowOffset: { width: 0, height: 4 }, 
+                                    shadowOpacity: 0.1, 
+                                    shadowRadius: 12,
+                                    borderWidth: 1,
+                                    borderColor: '#f1f5f9',
+                                    zIndex: 1000,
+                                    padding: 4
+                                }}>
+                                    {['All Alerts', 'Advisory', 'Warning', 'Critical', 'Reports', 'Evacuation'].map((type) => (
+                                        <TouchableOpacity
+                                            key={type}
+                                            style={{ 
+                                                paddingVertical: 8, 
+                                                paddingHorizontal: 12, 
+                                                borderRadius: 8,
+                                                backgroundColor: filterType === type ? '#f8fafc' : 'transparent'
+                                            }}
+                                            onPress={() => {
+                                                setFilterType(type);
+                                                setShowFilterDropdown(false);
+                                            }}
+                                        >
+                                            <Text style={{ 
+                                                fontSize: 12, 
+                                                fontFamily: filterType === type ? "Poppins_700Bold" : "Poppins_400Regular",
+                                                color: filterType === type ? '#0f172a' : '#64748b'
+                                            }}>{type}</Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            )}
                         </View>
                     </View>
 
@@ -528,64 +573,82 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                             <Feather name="shield" size={48} color="#16a34a" />
                             <Text style={{ color: '#64748b', marginTop: 16, fontSize: 14 }}>All clear. No active threats detected.</Text>
                         </View>
-                    ) : (
-                        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 12 }} showsVerticalScrollIndicator={false}>
-                            {activeAlerts.map(a => {
-                                const levelMap = {
-                                    advisory: { label: 'ADVISORY', color: '#3b82f6', bg: '#eff6ff', progress: 0.25 },
-                                    watch: { label: 'WATCH', color: '#f59e0b', bg: '#fffbeb', progress: 0.5 },
-                                    warning: { label: 'WARNING', color: '#ef4444', bg: '#fef2f2', progress: 0.75 },
-                                    critical: { label: 'CRITICAL', color: '#7f1d1d', bg: '#fee2e2', progress: 1.0 },
-                                };
-                                const meta = levelMap[a.level] || levelMap.advisory;
-                                return (
-                                    <View key={a.id} style={styles.ccAlertCard}>
-                                        <View style={styles.ccAlertCardHeader}>
-                                            <View style={[styles.ccAlertLevelBadge, { backgroundColor: meta.bg }]}>
-                                                <Text style={[styles.ccAlertLevelText, { color: meta.color }]}>{meta.label}</Text>
-                                            </View>
-                                            <Text style={{ fontSize: 12, color: '#94a3b8' }}>{new Date(a.timestamp).toLocaleTimeString()}</Text>
-                                        </View>
+                    ) : (() => {
+                        const filteredAlerts = activeAlerts.filter(a => {
+                            if (!a) return false;
+                            const lvl = a.level?.toLowerCase();
+                            if (filterType === 'All Alerts') return true;
+                            if (filterType === 'Advisory') return lvl === 'advisory';
+                            if (filterType === 'Warning') return lvl === 'warning';
+                            if (filterType === 'Critical') return lvl === 'critical';
+                            if (filterType === 'Evacuation') return lvl === 'evacuation';
+                            if (filterType === 'Reports') return a.source === 'report';
+                            return true;
+                        });
 
-                                        <Text style={{ fontSize: 16, fontFamily: "Poppins_700Bold", color: '#0f172a' }}>{a.title}</Text>
-                                        <Text style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>Area: {a.barangay}</Text>
-
-                                        <View style={styles.ccAlertProgressContainer}>
-                                            <View style={[styles.ccAlertProgressBar, { width: `${meta.progress * 100}%`, backgroundColor: meta.color }]} />
-                                        </View>
-
-                                        <View style={styles.ccAlertActionRow}>
-                                            <TouchableOpacity
-                                                style={[styles.ccActionButton, { backgroundColor: '#f1f5f9' }]}
-                                                onPress={() => handleResolveAlert(a.id)}
+                        return (
+                            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 12 }} showsVerticalScrollIndicator={false}>
+                                {filteredAlerts.length > 0 ? (
+                                    filteredAlerts.map((a, idx) => {
+                                        const levelMap = {
+                                            advisory: { label: 'ADVISORY', color: '#3b82f6', bg: '#eff6ff', progress: 0.33 },
+                                            warning: { label: 'WARNING', color: '#f97316', bg: '#fff7ed', progress: 0.66 },
+                                            critical: { label: 'CRITICAL', color: '#dc2626', bg: '#fef2f2', progress: 1.0 },
+                                            evacuation: { label: 'EVACUATION', color: '#1e3a8a', bg: '#dbeafe', progress: 0.5 },
+                                        };
+                                        const meta = levelMap[a.level?.toLowerCase()] || levelMap.advisory;
+                                        const isEvac = a.level?.toLowerCase() === 'evacuation';
+                                        
+                                        return (
+                                            <TouchableOpacity 
+                                                key={a.id || `alert-${idx}`} 
+                                                style={[styles.ccAlertCard, { borderLeftWidth: 8, borderLeftColor: meta.color }]}
+                                                onPress={() => {
+                                                    if (a) {
+                                                        setSelectedAlertForModal(a);
+                                                        setShowAlertDetailsModal(true);
+                                                    }
+                                                }}
+                                                activeOpacity={0.7}
                                             >
-                                                <Feather name="check-circle" size={16} color="#64748b" />
-                                                <Text style={[styles.ccActionButtonText, { color: '#64748b' }]}>Resolve</Text>
-                                            </TouchableOpacity>
+                                                <View style={styles.ccAlertCardHeader}>
+                                                    <View style={[styles.ccAlertLevelBadge, { backgroundColor: meta.bg }]}>
+                                                        <Text style={[styles.ccAlertLevelText, { color: meta.color }]}>{meta.label}</Text>
+                                                    </View>
+                                                    <Text style={{ fontSize: 12, color: '#94a3b8' }}>
+                                                        {a.timestamp ? new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                                                    </Text>
+                                                </View>
 
-                                            {a.level !== 'critical' && (
-                                                <TouchableOpacity
-                                                    style={[styles.ccActionButton, { backgroundColor: '#fee2e2' }]}
-                                                    onPress={() => handleEscalate(a.id)}
-                                                >
-                                                    <Feather name="trending-up" size={16} color="#ef4444" />
-                                                    <Text style={[styles.ccActionButtonText, { color: '#ef4444' }]}>Escalate</Text>
-                                                </TouchableOpacity>
-                                            )}
+                                                <Text style={{ fontSize: 16, fontFamily: "Poppins_700Bold", color: '#0f172a' }}>{a.title || 'Untitled Alert'}</Text>
+                                                <Text style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>Area: {a.barangay || 'All'}</Text>
 
-                                            <TouchableOpacity
-                                                style={[styles.ccActionButton, { backgroundColor: '#fee2e2' }]}
-                                                onPress={() => handleDeleteAlert(a.id, a.title)}
-                                            >
-                                                <Feather name="trash-2" size={16} color="#dc2626" />
-                                                <Text style={[styles.ccActionButtonText, { color: '#dc2626' }]}>Delete</Text>
+                                                {!isEvac && (
+                                                    <View style={styles.ccAlertProgressContainer}>
+                                                        <View style={[styles.ccAlertProgressBar, { width: `${(meta.progress || 0.1) * 100}%`, backgroundColor: meta.color }]} />
+                                                    </View>
+                                                )}
+
+                                                {isEvac && (
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, backgroundColor: '#eff6ff', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, alignSelf: 'flex-start' }}>
+                                                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: a.evacuation_status === 'closed' ? '#ef4444' : a.evacuation_status === 'full' ? '#f59e0b' : '#10b981' }} />
+                                                        <Text style={{ fontSize: 11, fontFamily: "Poppins_700Bold", color: '#1e3a8a' }}>
+                                                            STATUS: {a.evacuation_status?.toUpperCase() || 'OPEN'}
+                                                        </Text>
+                                                    </View>
+                                                )}
                                             </TouchableOpacity>
-                                        </View>
+                                        );
+                                    })
+                                ) : (
+                                    <View style={{ alignItems: 'center', paddingVertical: 60 }}>
+                                        <Feather name="search" size={32} color="#cbd5e1" />
+                                        <Text style={{ color: '#94a3b8', marginTop: 12, fontSize: 14 }}>No {filterType} found in active alerts.</Text>
                                     </View>
-                                );
-                            })}
-                        </ScrollView>
-                    )}
+                                )}
+                            </ScrollView>
+                        );
+                    })()}
                 </View>
             </View>
 
@@ -662,23 +725,27 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                     <View style={{ marginBottom: 16 }}>
                         <Text style={styles.alertInputLabel}>Priority Level</Text>
                         <View style={styles.ccBrgyGrid}>
-                            {['advisory', 'watch', 'warning'].map(level => (
+                            {['advisory', 'warning', 'critical'].map(level => (
                                 <TouchableOpacity
                                     key={level}
                                     style={[
                                         styles.ccBrgyChip,
-                                        alertType === level && { borderColor: level === 'advisory' ? '#3b82f6' : level === 'watch' ? '#f59e0b' : '#ef4444', backgroundColor: level === 'advisory' ? '#eff6ff' : level === 'watch' ? '#fffbeb' : '#fef2f2' }
-                                    ]}
+                                        alertType === level && { 
+                                            borderColor: level === 'advisory' ? '#3b82f6' : level === 'warning' ? '#f97316' : '#dc2626', 
+                                            backgroundColor: level === 'advisory' ? '#eff6ff' : level === 'warning' ? '#fff7ed' : '#fef2f2' 
+                                        }
+                                     ]}
                                     onPress={() => setAlertType(level)}
                                 >
-                                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: level === 'advisory' ? '#3b82f6' : level === 'watch' ? '#f59e0b' : '#ef4444' }} />
-                                    <Text style={[styles.ccBrgyChipText, alertType === level && { color: level === 'advisory' ? '#1d4ed8' : level === 'watch' ? '#b45309' : '#b91c1c', fontFamily: "Poppins_700Bold" }]}>
+                                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: level === 'advisory' ? '#3b82f6' : level === 'warning' ? '#f97316' : '#dc2626' }} />
+                                    <Text style={[styles.ccBrgyChipText, alertType === level && { color: level === 'advisory' ? '#1d4ed8' : level === 'warning' ? '#ea580c' : '#dc2626', fontFamily: "Poppins_700Bold" }]}>
                                         {level.toUpperCase()}
                                     </Text>
                                 </TouchableOpacity>
                             ))}
                         </View>
                     </View>
+
 
                     <View style={{ marginBottom: 16 }}>
                         <Text style={styles.alertInputLabel}>Alert Headline</Text>
@@ -690,16 +757,6 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                         />
                     </View>
 
-                    <View style={{ marginBottom: 16 }}>
-                        <Text style={styles.alertInputLabel}>Dispatch Message</Text>
-                        <TextInput
-                            style={[styles.alertMessageInput, { backgroundColor: '#f8fafc', height: 120 }]}
-                            placeholder="Provide clear instructions for affected residents..."
-                            multiline
-                            value={alertMessage}
-                            onChangeText={setAlertMessage}
-                        />
-                    </View>
 
                     <View style={{ marginBottom: 16 }}>
                         <Text style={styles.alertInputLabel}>Recommended Action</Text>
@@ -751,11 +808,11 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
                     <ScrollView style={{ marginTop: 16, flex: 1 }} contentContainerStyle={{ paddingBottom: 12 }} showsVerticalScrollIndicator={false}>
                         {alertHistory.map(item => (
-                            <View key={item.id} style={{ paddingBottom: 16, marginBottom: 16, paddingRight: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+                            <View key={item.id} style={{ position: 'relative', paddingBottom: 16, marginBottom: 16, paddingRight: 40, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                                     <View style={{ flex: 1 }}>
                                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                                            <Text style={{ fontSize: 11, fontFamily: "Poppins_700Bold", color: item.level === 'warning' ? '#ef4444' : '#64748b' }}>
+                                            <Text style={{ fontSize: 11, fontFamily: "Poppins_700Bold", color: item.level === 'critical' ? '#dc2626' : item.level === 'warning' ? '#f97316' : item.level === 'evacuation' ? '#1e3a8a' : '#3b82f6' }}>
                                                 {item.level.toUpperCase()}
                                             </Text>
                                             <Text style={{ fontSize: 11, color: '#94a3b8' }}>{new Date(item.timestamp).toLocaleDateString()}</Text>
@@ -766,11 +823,22 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                 </View>
                                 
                                 <TouchableOpacity
-                                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8, backgroundColor: '#fee2e2', borderRadius: 6, alignSelf: 'flex-start', marginTop: 8 }}
+                                    style={{ 
+                                        position: 'absolute',
+                                        bottom: 16,
+                                        right: 0,
+                                        width: 32,
+                                        height: 32,
+                                        backgroundColor: '#ffffff',
+                                        borderWidth: 1,
+                                        borderColor: '#e2e8f0',
+                                        borderRadius: 8,
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
+                                    }}
                                     onPress={() => handleDeleteAlert(item.id, item.title)}
                                 >
-                                    <Feather name="trash-2" size={14} color="#dc2626" />
-                                    <Text style={{ fontSize: 11, fontFamily: "Poppins_600SemiBold", color: '#dc2626' }}>Delete</Text>
+                                    <Feather name="trash-2" size={16} color="#dc2626" />
                                 </TouchableOpacity>
                             </View>
                         ))}
@@ -845,7 +913,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 onRequestClose={() => setShowReportDetailsModal(false)}
             >
                 <View style={{ flex: 1, backgroundColor: 'rgba(15,23,42,0.65)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
-                    <View style={{ backgroundColor: '#ffffff', borderRadius: 20, width: '100%', maxWidth: 860, maxHeight: '90%', overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 20 }, shadowOpacity: 0.25, shadowRadius: 40 }}>
+                    <View style={{ backgroundColor: '#ffffff', borderRadius: 20, width: '100%', maxWidth: 900, height: '90%', overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 20 }, shadowOpacity: 0.25, shadowRadius: 40 }}>
                         {selectedReportForModal && (
                             <>
                                 {/* Modal Header */}
@@ -986,8 +1054,8 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                     </ScrollView>
 
                                     {/* RIGHT — Official Response */}
-                                    <View style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                                        <ScrollView contentContainerStyle={{ padding: 24 }} showsVerticalScrollIndicator={false}>
+                                    <View style={{ flex: 1.2, backgroundColor: '#fcfcfc', borderLeftWidth: 1, borderLeftColor: '#f1f5f9' }}>
+                                        <ScrollView contentContainerStyle={{ padding: 28 }} showsVerticalScrollIndicator={false}>
                                             <Text style={{ fontSize: 11, fontFamily: "Poppins_700Bold", color: '#94a3b8', letterSpacing: 1, marginBottom: 20, textTransform: 'uppercase' }}>Official Response</Text>
 
                                             {/* Flood Level */}
@@ -1024,7 +1092,6 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                                 <View style={{ flexDirection: 'row', gap: 8 }}>
                                                     {[
                                                         { value: "Active",   icon: "zap",          color: "#d97706", bg: "#fffbeb" },
-                                                        { value: "Resolved", icon: "check-circle",  color: "#16a34a", bg: "#f0fdf4" },
                                                     ].map(({ value, icon, color, bg }) => (
                                                         <TouchableOpacity
                                                             key={value}
@@ -1092,6 +1159,167 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                         </View>
                                     </View>
 
+                                </View>
+                            </>
+                        )}
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Alert Details Modal */}
+            <Modal
+                visible={showAlertDetailsModal}
+                transparent={true}
+                animationType="fade"
+                onRequestClose={() => setShowAlertDetailsModal(false)}
+            >
+                <View style={{ flex: 1, backgroundColor: 'rgba(15,23,42,0.8)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                    <View style={{ backgroundColor: '#ffffff', borderRadius: 24, width: '100%', maxWidth: 650, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 25 }}>
+                        {selectedAlertForModal && (
+                            <>
+                                {/* Modal Header (Dark Themed) */}
+                                <View style={{ backgroundColor: '#20293a', paddingHorizontal: 28, paddingVertical: 24, borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                                        <View>
+                                            <Text style={{ fontSize: 22, fontFamily: "Poppins_700Bold", color: '#ffffff' }}>{selectedAlertForModal.title}</Text>
+                                            <Text style={{ fontSize: 14, color: '#94a3b8', marginTop: 2 }}>
+                                                {selectedAlertForModal.level === 'evacuation' ? 'Evacuation Update' : 'Flood Alert'} • {selectedAlertForModal.barangay === 'All' ? 'Community Wide' : `Barangay ${selectedAlertForModal.barangay}`}
+                                            </Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            onPress={() => setShowAlertDetailsModal(false)}
+                                            style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }}
+                                        >
+                                            <Feather name="x" size={24} color="#ffffff" />
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+
+                                <ScrollView style={{ padding: 28, maxHeight: 600 }} showsVerticalScrollIndicator={false}>
+                                    {/* Metrics Row (Two Boxes) */}
+                                    <View style={{ flexDirection: 'row', gap: 16, marginBottom: 28 }}>
+                                        <View style={{ flex: 1, backgroundColor: '#ffffff', borderRadius: 16, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#e2e8f0', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 10 }}>
+                                            <MaterialCommunityIcons name={selectedAlertForModal.level === 'evacuation' ? "home-city-outline" : "alert-decagram-outline"} size={22} color="#94a3b8" />
+                                            <Text style={{ fontSize: 10, fontFamily: "Poppins_700Bold", color: '#94a3b8', letterSpacing: 0.5, marginTop: 8, textTransform: 'uppercase' }}>
+                                                {selectedAlertForModal.level === 'evacuation' ? 'Facility Status' : 'Priority Level'}
+                                            </Text>
+                                            <View style={{ width: 30, height: 1, backgroundColor: '#cbd5e1', marginVertical: 12 }} />
+                                            <Text style={{ fontSize: 14, fontFamily: "Poppins_700Bold", color: '#1e293b', textAlign: 'center' }}>
+                                                {selectedAlertForModal.level === 'evacuation' ? (selectedAlertForModal.evacuation_status?.toUpperCase() || 'OPEN') : selectedAlertForModal.level?.toUpperCase()}
+                                            </Text>
+                                        </View>
+
+                                        <View style={{ flex: 1, backgroundColor: '#ffffff', borderRadius: 16, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#e2e8f0', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 10 }}>
+                                            <MaterialCommunityIcons name="map-marker-radius-outline" size={22} color="#94a3b8" />
+                                            <Text style={{ fontSize: 10, fontFamily: "Poppins_700Bold", color: '#94a3b8', letterSpacing: 0.5, marginTop: 8, textTransform: 'uppercase' }}>Scope / Area</Text>
+                                            <View style={{ width: 30, height: 1, backgroundColor: '#cbd5e1', marginVertical: 12 }} />
+                                            <Text style={{ fontSize: 14, fontFamily: "Poppins_700Bold", color: '#1e293b', textAlign: 'center' }}>
+                                                {selectedAlertForModal.barangay === 'All' ? 'COMMUNITY' : selectedAlertForModal.barangay?.toUpperCase()}
+                                            </Text>
+                                        </View>
+                                    </View>
+
+                                    {/* Centered Status Pill */}
+                                    <View style={{ alignItems: 'center', marginBottom: 32 }}>
+                                        <View style={{ 
+                                            backgroundColor: '#ffffff', 
+                                            borderWidth: 1.5,
+                                            borderColor: selectedAlertForModal.level === 'critical' ? '#dc2626' : selectedAlertForModal.level === 'warning' ? '#f97316' : selectedAlertForModal.level === 'advisory' ? '#3b82f6' : '#1e3a8a',
+                                            paddingHorizontal: 28, 
+                                            paddingVertical: 8, 
+                                            borderRadius: 24,
+                                        }}>
+                                            <Text style={{ fontSize: 11, fontFamily: "Poppins_700Bold", color: selectedAlertForModal.level === 'critical' ? '#dc2626' : selectedAlertForModal.level === 'warning' ? '#f97316' : selectedAlertForModal.level === 'advisory' ? '#3b82f6' : '#1e3a8a', letterSpacing: 1.5, textTransform: 'uppercase' }}>
+                                                {selectedAlertForModal.level === 'evacuation' ? 'Evacuation Alert' : 'Active Alert'}
+                                            </Text>
+                                        </View>
+                                    </View>
+
+                                    {/* Detail List with Dashed Lines (Simplified with solid thin lines) */}
+                                    <View style={{ marginBottom: 28 }}>
+                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+                                            <Text style={{ fontSize: 13, color: '#64748b', fontFamily: "Poppins_600SemiBold" }}>Timestamp</Text>
+                                            <Text style={{ fontSize: 13, color: '#1e293b', fontFamily: "Poppins_700Bold" }}>
+                                                {selectedAlertForModal.timestamp ? new Date(selectedAlertForModal.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'N/A'}
+                                            </Text>
+                                        </View>
+
+                                        {selectedAlertForModal.level === 'evacuation' ? (
+                                            <>
+                                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+                                                    <Text style={{ fontSize: 13, color: '#64748b', fontFamily: "Poppins_600SemiBold" }}>Facility Location</Text>
+                                                    <Text style={{ fontSize: 13, color: '#1e293b', fontFamily: "Poppins_700Bold" }}>{selectedAlertForModal.evacuation_location || 'N/A'}</Text>
+                                                </View>
+                                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+                                                    <Text style={{ fontSize: 13, color: '#64748b', fontFamily: "Poppins_600SemiBold" }}>Facility Capacity</Text>
+                                                    <Text style={{ fontSize: 13, color: '#1e293b', fontFamily: "Poppins_700Bold" }}>{selectedAlertForModal.evacuation_capacity || 'N/A'}</Text>
+                                                </View>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+                                                    <Text style={{ fontSize: 13, color: '#64748b', fontFamily: "Poppins_600SemiBold" }}>Incident Status</Text>
+                                                    <Text style={{ fontSize: 13, color: '#1e293b', fontFamily: "Poppins_700Bold" }}>Active</Text>
+                                                </View>
+                                                {selectedAlertForModal.recommended_action && (
+                                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+                                                        <Text style={{ fontSize: 13, color: '#64748b', fontFamily: "Poppins_600SemiBold" }}>Rec. Action</Text>
+                                                        <Text style={{ fontSize: 13, color: '#1e293b', fontFamily: "Poppins_700Bold", flex: 1, textAlign: 'right', marginLeft: 20 }}>{selectedAlertForModal.recommended_action}</Text>
+                                                    </View>
+                                                )}
+                                            </>
+                                        )}
+                                    </View>
+
+                                    {/* Removed Description Section */}
+                                </ScrollView>
+
+                                <View style={{ padding: 28, borderTopWidth: 1, borderTopColor: '#f1f5f9', flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                                    {selectedAlertForModal.level !== 'critical' && selectedAlertForModal.level !== 'evacuation' && (
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                setShowAlertDetailsModal(false);
+                                                handleEscalate(selectedAlertForModal.id);
+                                            }}
+                                            style={{ 
+                                                borderWidth: 2,
+                                                borderColor: '#20293a',
+                                                paddingHorizontal: 20, 
+                                                paddingVertical: 10, 
+                                                borderRadius: 12,
+                                                flexDirection: 'row',
+                                                alignItems: 'center',
+                                                gap: 8,
+                                                opacity: 0.9,
+                                                backgroundColor: '#ffffff'
+                                            }}
+                                        >
+                                            <Feather name="trending-up" size={16} color="#20293a" />
+                                            <Text style={{ fontSize: 14, fontFamily: "Poppins_700Bold", color: '#20293a' }}>Escalate</Text>
+                                        </TouchableOpacity>
+                                    )}
+
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            setShowAlertDetailsModal(false);
+                                            handleDeleteAlert(selectedAlertForModal.id, selectedAlertForModal.title);
+                                        }}
+                                        style={{ 
+                                            borderWidth: 2,
+                                            borderColor: '#dc2626',
+                                            paddingHorizontal: 20, 
+                                            paddingVertical: 10, 
+                                            borderRadius: 12,
+                                            flexDirection: 'row',
+                                            alignItems: 'center',
+                                            gap: 8,
+                                            opacity: 0.9,
+                                            backgroundColor: 'rgba(255,255,255,0.05)'
+                                        }}
+                                    >
+                                        <Feather name="trash-2" size={16} color="#dc2626" />
+                                        <Text style={{ fontSize: 14, fontFamily: "Poppins_700Bold", color: '#dc2626' }}>Delete</Text>
+                                    </TouchableOpacity>
                                 </View>
                             </>
                         )}

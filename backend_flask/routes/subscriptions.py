@@ -3,7 +3,7 @@ from utils.db import get_db
 
 subscriptions_bp = Blueprint('subscriptions', __name__)
 
-LEVEL_ORDER = ['advisory', 'watch', 'warning', 'critical']
+LEVEL_ORDER = ['advisory', 'warning', 'critical']
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -176,26 +176,7 @@ def escalate_alert(alert_id):
     })
 
 
-@subscriptions_bp.route('/resolve/<int:alert_id>', methods=['POST'])
-def resolve_alert(alert_id):
-    """Manually resolve (close) an active alert."""
-    data = request.get_json() or {}
-    resolved_by = data.get('resolved_by', 'admin')
 
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute(
-        "UPDATE alerts SET status = 'resolved' WHERE id = %s AND status = 'active'",
-        (alert_id,)
-    )
-    db.commit()
-    updated = cursor.rowcount
-    cursor.close()
-
-    if not updated:
-        return jsonify({"error": "Alert not found or already resolved"}), 404
-
-    return jsonify({"message": "Alert resolved successfully", "alert_id": alert_id})
 
 
 @subscriptions_bp.route('/escalation-log/<int:alert_id>', methods=['GET'])
@@ -227,7 +208,7 @@ def auto_escalate():
     THRESHOLDS = [
         (8, 'critical'),
         (5, 'warning'),
-        (2, 'watch'),
+        (3, 'advisory'),
     ]
 
     # Count verified reports per barangay in last 6 hours
@@ -260,7 +241,7 @@ def auto_escalate():
             SELECT id, level FROM alerts
             WHERE status = 'active'
               AND (barangay = %s OR barangay = 'All')
-            ORDER BY FIELD(level, 'advisory', 'watch', 'warning', 'critical') DESC
+            ORDER BY FIELD(level, 'advisory', 'warning', 'critical') DESC
             LIMIT 1
         """, (barangay,))
         existing = cursor2.fetchone()

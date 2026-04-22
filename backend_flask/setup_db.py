@@ -33,6 +33,9 @@ def run_migrations(conn=None, cursor=None):
         ("reports",      "report_status",      "VARCHAR(100) DEFAULT NULL"),
         ("alerts",       "recommended_action", "VARCHAR(500) DEFAULT NULL"),
         ("alerts",       "incident_status",    "VARCHAR(100) DEFAULT 'Active'"),
+        ("alerts",       "evacuation_status",  "VARCHAR(50) DEFAULT NULL"),
+        ("alerts",       "evacuation_location","VARCHAR(500) DEFAULT NULL"),
+        ("alerts",       "evacuation_capacity","INT DEFAULT 0"),
         ("iot_readings", "raw_distance",       "DECIMAL(10,2) DEFAULT NULL"),
     ]
 

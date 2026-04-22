@@ -264,18 +264,24 @@ const callCenter = (phone) => {
 };
 
 const getStatusColor = (status) => {
-  switch (status?.toUpperCase()) {
-    case "SAFE":
-    case "NORMAL":
-      return "#4ade80";
-    case "ADVISORY":
-      return "#fbbf24";
-    case "WARNING":
-      return "#f97316";
-    case "CRITICAL":
-      return "#ef4444";
-    default:
-      return "#94a3b8";
+  switch (status) {
+    case "CRITICAL": return "#dc2626"; // Red
+    case "WARNING": return "#f97316";  // Orange
+    case "ADVISORY": return "#3b82f6"; // Blue
+    case "NORMAL": return "#22c55e";   // Green
+    case "OFFLINE": return "#64748b";
+    default: return "#64748b";
+  }
+};
+
+const getStatusBgColor = (status) => {
+  switch (status) {
+    case "CRITICAL": return "rgba(220, 38, 38, 0.1)";
+    case "WARNING": return "rgba(249, 115, 22, 0.1)";
+    case "ADVISORY": return "rgba(59, 130, 246, 0.1)";
+    case "NORMAL": return "rgba(34, 197, 94, 0.1)";
+    case "OFFLINE": return "rgba(100, 116, 139, 0.1)";
+    default: return "rgba(100, 116, 139, 0.1)";
   }
 };
 
@@ -2049,8 +2055,19 @@ const DashboardScreen = ({ navigation }) => {
     navigation.replace("Landing");
   };
 
-  const isOffline = !latestSensor || latestSensor.status === "OFFLINE";
-  const statusColor = getStatusColor(latestSensor?.status || "UNKNOWN");
+  const isOffline = !latestSensor || latestSensor.status === "OFFLINE" || latestSensor.is_offline;
+  
+  const getLiveStatus = () => {
+    if (isOffline) return "OFFLINE";
+    const lvl = Number(latestSensor?.flood_level ?? 0);
+    if (lvl >= (thresholds?.critical_cm || 25)) return "CRITICAL";
+    if (lvl >= (thresholds?.warning_cm || 15)) return "WARNING";
+    if (lvl >= (thresholds?.advisory_cm || 10)) return "ADVISORY";
+    return "NORMAL";
+  };
+
+  const liveStatus = getLiveStatus();
+  const statusColor = getStatusColor(liveStatus);
   const floodLevel = Number(latestSensor?.flood_level ?? 0);
   const rawDistance = Number(latestSensor?.raw_distance ?? 0);
   const maxRange = thresholds?.critical_cm || 25;
@@ -2083,7 +2100,7 @@ const DashboardScreen = ({ navigation }) => {
             <View style={[styles.safeBadge, isOffline && { backgroundColor: 'rgba(148,163,184,0.15)' }]}>
               <View style={[styles.safeBadgeDot, isOffline && { backgroundColor: '#94a3b8' }]} />
               <Text style={[styles.safeBadgeText, isOffline && { color: '#94a3b8' }]}>
-                {isOffline ? "OFFLINE" : (latestSensor?.status === "NORMAL" ? "SAFE" : latestSensor?.status || "SAFE")}
+                {isOffline ? "OFFLINE" : (liveStatus === "NORMAL" ? "SAFE" : liveStatus)}
               </Text>
             </View>
           </View>
@@ -2102,7 +2119,7 @@ const DashboardScreen = ({ navigation }) => {
               <View style={[styles.riskLevelBarFill, { width: `${fillPct}%`, backgroundColor: statusColor }]} />
             </View>
             <Text style={[styles.riskLevelValue, { color: statusColor }]}>
-              {isOffline ? "—" : (latestSensor?.status || "NORMAL")}
+              {isOffline ? "—" : liveStatus}
             </Text>
           </View>
         </View>
@@ -2169,7 +2186,7 @@ const DashboardScreen = ({ navigation }) => {
               <View style={styles.statusChip}>
                 <View style={[styles.statusChipDot, { backgroundColor: statusColor }]} />
                 <Text style={styles.statusChipText}>
-                  {loadingSensor ? "LOADING" : (isOffline ? "OFFLINE" : (latestSensor?.status || "UNKNOWN"))}
+                  {loadingSensor ? "LOADING" : (isOffline ? "OFFLINE" : liveStatus)}
                 </Text>
               </View>
             </View>
@@ -2453,9 +2470,6 @@ const AlertsScreen = ({ navigation }) => {
     if (filter === "active") {
       return alerts.filter((alert) => alert.status === "active");
     }
-    if (filter === "resolved") {
-      return alerts.filter((alert) => alert.status === "resolved");
-    }
     if (filter === "critical") {
       return alerts.filter((alert) => alert.severity === "critical");
     }
@@ -2470,27 +2484,21 @@ const AlertsScreen = ({ navigation }) => {
     let accent = "#32c26a";
     let statusLabel = "NORMAL MONITORING";
 
-    if (alert.title?.toLowerCase().includes("new evacuation center")) {
-      accent = "#2fb864"; // SAFE GREEN
-      statusLabel = "SAFE ZONE AVAILABLE";
-    } else if (alert.severity === "critical" || alert.title?.toLowerCase().includes("evacuat")) {
-      accent = "#e2463b"; // RED
-      statusLabel = "ASSISTED EVACUATION";
-    } else if (alert.severity === "warning" || alert.title?.toLowerCase().includes("pre-emptive")) {
-      accent = "#f29339"; // ORANGE
-      statusLabel = "PRE-EMPTIVE EVACUATION";
-    } else if (alert.severity === "advisory" || alert.title?.toLowerCase().includes("advisory")) {
-      accent = "#f5c542"; // YELLOW
-      statusLabel = "ALERT / READY";
+    if (alert.level === "evacuation") {
+      accent = "#1e3a8a"; // DARK BLUE
+      statusLabel = `CENTER: ${alert.evacuation_status?.toUpperCase() || 'OPEN'}`;
+    } else if (alert.severity === "critical") {
+      accent = "#dc2626"; // RED
+      statusLabel = "CRITICAL RISK";
+    } else if (alert.severity === "warning") {
+      accent = "#f97316"; // ORANGE
+      statusLabel = "WARNING RISK";
+    } else if (alert.severity === "advisory") {
+      accent = "#3b82f6"; // BLUE
+      statusLabel = "ADVISORY LEVEL";
     } else {
-      accent = "#32c26a"; // GREEN
-      statusLabel = "NORMAL MONITORING";
-    }
-
-    // Force Green if resolved
-    if (alert.status === "resolved") {
-      accent = "#32c26a";
-      statusLabel = "NORMAL MONITORING";
+      accent = "#22c55e"; // GREEN
+      statusLabel = "NORMAL";
     }
 
     return (
@@ -2504,13 +2512,13 @@ const AlertsScreen = ({ navigation }) => {
           <View style={styles.alertIcon}>
             <Ionicons
               name={
-                accent === "#e2463b"
-                  ? "warning"
-                  : accent === "#f29339"
-                    ? "alert"
-                    : accent === "#f5c542"
-                      ? "notifications"
-                      : "checkmark-circle"
+                alert.level === "evacuation"
+                  ? "home"
+                  : accent === "#dc2626"
+                    ? "warning"
+                    : accent === "#f97316"
+                      ? "alert"
+                      : "notifications"
               }
               size={18}
               color={accent}
@@ -2531,14 +2539,15 @@ const AlertsScreen = ({ navigation }) => {
         </View>
 
         {/* Level Badge (Official Flood Level) */}
-        {alert.level && (
+        {/* Level Badge (Official Flood Level) - Only for non-evacuation */}
+        {alert.level && alert.level !== 'evacuation' && (
           <View style={{ flexDirection: 'row', marginBottom: 8 }}>
             <View style={[
               styles.levelBadge,
               {
                 backgroundColor:
-                  alert.level === "critical" ? "#e2463b" :
-                    alert.level === "warning" ? "#f29339" : "#f5c542"
+                  alert.level === "critical" ? "#dc2626" :
+                    alert.level === "warning" ? "#f97316" : "#3b82f6"
               }
             ]}>
               <Text style={styles.levelBadgeText}>
@@ -2548,8 +2557,22 @@ const AlertsScreen = ({ navigation }) => {
           </View>
         )}
 
+        {/* Evacuation Specific Info */}
+        {alert.level === 'evacuation' && (
+           <View style={{ marginBottom: 8, backgroundColor: 'rgba(30, 58, 138, 0.1)', padding: 10, borderRadius: 8 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                 <Text style={{ color: '#94a3b8', fontSize: 11 }}>Location:</Text>
+                 <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600' }}>{alert.evacuation_location || alert.location}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                 <Text style={{ color: '#94a3b8', fontSize: 11 }}>Capacity:</Text>
+                 <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600' }}>{alert.evacuation_capacity || 'N/A'}</Text>
+              </View>
+           </View>
+        )}
+
         <Text style={styles.alertDescription}>{alert.description}</Text>
-        {(alert.recommended_action || alert.actions) ? (
+        {(alert.recommended_action || alert.actions) && alert.level !== 'evacuation' ? (
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginTop: 6, gap: 6 }}>
             <Ionicons name="bulb-outline" size={14} color="#16a34a" style={{ marginTop: 1 }} />
             <Text style={[styles.alertMetaText, { flex: 1, color: '#16a34a', fontWeight: '600' }]} numberOfLines={2}>
@@ -2557,17 +2580,17 @@ const AlertsScreen = ({ navigation }) => {
             </Text>
           </View>
         ) : null}
-        {alert.incident_status ? (
+        {alert.incident_status && alert.level !== 'evacuation' ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6 }}>
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: alert.incident_status === 'Resolved' ? '#16a34a' : '#f59e0b' }} />
-            <Text style={[styles.alertMetaText, { color: alert.incident_status === 'Resolved' ? '#16a34a' : '#f59e0b', fontWeight: '700', fontSize: 10, textTransform: 'uppercase' }]}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#f59e0b' }} />
+            <Text style={[styles.alertMetaText, { color: '#f59e0b', fontWeight: '700', fontSize: 10, textTransform: 'uppercase' }]}>
               Status: {alert.incident_status}
             </Text>
           </View>
         ) : null}
         <View style={styles.alertMeta}>
           <Text style={styles.alertMetaText}>{alert.location}</Text>
-          <Text style={styles.alertMetaText}>{alert.timestamp}</Text>
+          <Text style={styles.alertMetaText}>{alert.timestamp && !isNaN(Date.parse(alert.timestamp)) ? new Date(alert.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : alert.timestamp}</Text>
         </View>
       </TouchableOpacity>
     );
@@ -2587,7 +2610,6 @@ const AlertsScreen = ({ navigation }) => {
           {[
             { id: "all", label: "All" },
             { id: "active", label: "Active" },
-            { id: "resolved", label: "Resolved" },
             { id: "critical", label: "Critical" },
           ].map((item) => (
             <TouchableOpacity
@@ -2687,7 +2709,7 @@ const AlertDetailScreen = ({ route, navigation }) => {
           <Text style={styles.alertDetailTitle}>{alert.title}</Text>
 
           {/* Detailed Level Indicator */}
-          {alert.level && (
+          {alert.level && alert.level !== 'evacuation' && (
             <View style={{ flexDirection: 'row', marginTop: 12, marginBottom: 8, alignItems: 'center', gap: 8 }}>
               <View style={[
                 styles.levelBadge,
@@ -2695,8 +2717,8 @@ const AlertDetailScreen = ({ route, navigation }) => {
                   paddingHorizontal: 12,
                   paddingVertical: 6,
                   backgroundColor:
-                    alert.level === "critical" ? "#e2463b" :
-                      alert.level === "warning" ? "#f29339" : "#f5c542"
+                    alert.level === "critical" ? "#dc2626" :
+                      alert.level === "warning" ? "#f97316" : "#3b82f6"
                 }
               ]}>
                 <Text style={[styles.levelBadgeText, { fontSize: 12 }]}>
@@ -2704,6 +2726,24 @@ const AlertDetailScreen = ({ route, navigation }) => {
                 </Text>
               </View>
               <Text style={{ color: '#94a3b8', fontSize: 13, fontWeight: '600' }}>Official Flood Level</Text>
+            </View>
+          )}
+
+          {alert.level === 'evacuation' && (
+            <View style={{ flexDirection: 'row', marginTop: 12, marginBottom: 8, alignItems: 'center', gap: 8 }}>
+              <View style={[
+                styles.levelBadge,
+                {
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  backgroundColor: "#1e3a8a"
+                }
+              ]}>
+                <Text style={[styles.levelBadgeText, { fontSize: 12 }]}>
+                  {alert.evacuation_status?.toUpperCase() || 'OPEN'}
+                </Text>
+              </View>
+              <Text style={{ color: '#94a3b8', fontSize: 13, fontWeight: '600' }}>Center Status</Text>
             </View>
           )}
 
@@ -2715,39 +2755,59 @@ const AlertDetailScreen = ({ route, navigation }) => {
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Ionicons name="time-outline" size={14} color="#94a3b8" />
-              <Text style={styles.alertMetaText}>{alert.timestamp}</Text>
+              <Text style={styles.alertMetaText}>{alert.timestamp && !isNaN(Date.parse(alert.timestamp)) ? new Date(alert.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : alert.timestamp}</Text>
             </View>
           </View>
         </Card>
 
-        {/* Official Recommendation Section */}
-        <Card style={[styles.alertDetailCard, { borderLeftWidth: 4, borderLeftColor: '#34d399' }]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-            <Ionicons name="shield-checkmark" size={18} color="#34d399" />
-            <Text style={[styles.alertDetailLabel, { color: '#34d399', marginBottom: 0 }]}>Official Recommendation</Text>
-          </View>
-          <Text style={[styles.alertDetailDescription, { fontStyle: 'italic', color: '#ffffff' }]}>
-            {alert.recommended_action || alert.recommendations || alert.actions || "No specific action recommended. Stay tuned for updates from local officials."}
-          </Text>
-        </Card>
+        {/* Evacuation Details */}
+        {alert.level === 'evacuation' && (
+           <Card style={styles.alertDetailCard}>
+              <Text style={styles.alertDetailLabel}>Center Information</Text>
+              <View style={{ gap: 12, marginTop: 8 }}>
+                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ color: '#94a3b8' }}>Location</Text>
+                    <Text style={{ color: '#fff', fontWeight: '600' }}>{alert.evacuation_location || alert.location}</Text>
+                 </View>
+                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ color: '#94a3b8' }}>Total Capacity</Text>
+                    <Text style={{ color: '#fff', fontWeight: '600' }}>{alert.evacuation_capacity || 'N/A'}</Text>
+                 </View>
+              </View>
+           </Card>
+        )}
 
-        {/* Current Incident Status */}
-        <Card style={styles.alertDetailCard}>
-          <Text style={styles.alertDetailLabel}>Incident Status</Text>
-          <View style={[
-            styles.incidentBadge,
-            { paddingHorizontal: 12, paddingVertical: 6 },
-            (alert.incident_status === "Resolved" || alert.report_status === "Resolved") ? styles.incidentBadgeResolved : styles.incidentBadgeActive
-          ]}>
-            <Text style={[
-              styles.incidentBadgeText,
-              { fontSize: 12 },
-              (alert.incident_status === "Resolved" || alert.report_status === "Resolved") && styles.incidentBadgeTextResolved
-            ]}>
-              {alert.incident_status || alert.report_status || (alert.status === "resolved" ? "Resolved" : "Active")}
+        {/* Official Recommendation Section - Not for evacuation */}
+        {alert.level !== 'evacuation' && (
+          <Card style={[styles.alertDetailCard, { borderLeftWidth: 4, borderLeftColor: '#34d399' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <Ionicons name="shield-checkmark" size={18} color="#34d399" />
+              <Text style={[styles.alertDetailLabel, { color: '#34d399', marginBottom: 0 }]}>Official Recommendation</Text>
+            </View>
+            <Text style={[styles.alertDetailDescription, { fontStyle: 'italic', color: '#ffffff' }]}>
+              {alert.recommended_action || alert.recommendations || alert.actions || "No specific action recommended. Stay tuned for updates from local officials."}
             </Text>
-          </View>
-        </Card>
+          </Card>
+        )}
+
+        {/* Current Incident Status - Not for evacuation */}
+        {alert.level !== 'evacuation' && (
+          <Card style={styles.alertDetailCard}>
+            <Text style={styles.alertDetailLabel}>Incident Status</Text>
+            <View style={[
+              styles.incidentBadge,
+              { paddingHorizontal: 12, paddingVertical: 6 },
+              styles.incidentBadgeActive
+            ]}>
+              <Text style={[
+                styles.incidentBadgeText,
+                { fontSize: 12 }
+              ]}>
+                {alert.incident_status || alert.report_status || "Active"}
+              </Text>
+            </View>
+          </Card>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

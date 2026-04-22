@@ -99,9 +99,9 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             if (is_offline) return "#64748b";
             switch (status?.toLowerCase()) {
                 case "normal": return "#16a34a";
-                case "warning": return "#f59e0b";
+                case "warning": return "#f97316"; // Orange
                 case "alarm":
-                case "critical": return "#dc2626";
+                case "critical": return "#dc2626"; // Red
                 default: return "#64748b";
             }
         };
@@ -249,10 +249,10 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 case "normal":
                     return "#16a34a";
                 case "warning":
-                    return "#f59e0b";
+                    return "#f97316"; // Orange
                 case "alarm":
                 case "critical":
-                    return "#dc2626";
+                    return "#dc2626"; // Red
                 case "error":
                     return "#64748b";
                 default:
@@ -311,7 +311,7 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             case "normal":
                 return "#16a34a"; // Green
             case "warning":
-                return "#f59e0b"; // Yellow/Orange
+                return "#f97316"; // Orange
             case "alarm":
             case "critical":
                 return "#dc2626"; // Red
@@ -340,10 +340,10 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             case "normal":
                 return "#16a34a";
             case "warning":
-                return "#f59e0b";
+                return "#f97316"; // Orange
             case "alarm":
             case "critical":
-                return "#dc2626";
+                return "#dc2626"; // Red
             case "error":
                 return "#64748b";
             default:

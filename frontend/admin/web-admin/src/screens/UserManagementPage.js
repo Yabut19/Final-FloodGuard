@@ -424,7 +424,7 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                                                 <Feather name="edit-2" size={16} color="#2563eb" />
                                             </TouchableOpacity>
                                             <TouchableOpacity
-                                                style={styles.userActionButton}
+                                                style={[styles.userActionButton, { backgroundColor: '#ffffff', borderColor: '#e2e8f0' }]}
                                                 onPress={() => handleDeleteUser(user.id)}
                                             >
                                                 <Feather name="trash-2" size={16} color="#dc2626" />

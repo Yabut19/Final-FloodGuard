@@ -234,7 +234,17 @@ const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
                                 ) : (
                                     liveSensors.map(sensor => {
                                         const isOffline = sensor.status === "OFFLINE";
-                                        const isWarn = sensor.status === "WARNING" || sensor.status === "CRITICAL";
+                                        
+                                        const getLiveStatus = () => {
+                                            if (isOffline) return "OFFLINE";
+                                            const lvl = Number(sensor.waterLevel || 0);
+                                            if (lvl >= thresholds.critical_level) return "CRITICAL";
+                                            if (lvl >= thresholds.warning_level) return "WARNING";
+                                            if (lvl >= thresholds.advisory_level) return "ADVISORY";
+                                            return "NORMAL";
+                                        };
+                                        const liveStatus = getLiveStatus();
+                                        const isWarn = liveStatus === "WARNING" || liveStatus === "CRITICAL";
                                         const pillStyle = isOffline ? db.pillGray : isWarn ? styles.dashboardAlertBadgeWarning : styles.dashboardSensorStatusPill;
                                         const pillTextStyle = isOffline ? db.pillGrayText : isWarn ? styles.dashboardAlertBadgeText : styles.dashboardSensorStatusText;
                                         return (
@@ -253,7 +263,7 @@ const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
                                                     </Text>
                                                 </View>
                                                 <View style={pillStyle}>
-                                                    <Text style={pillTextStyle}>{sensor.status}</Text>
+                                                    <Text style={pillTextStyle}>{liveStatus}</Text>
                                                 </View>
                                             </View>
                                         );

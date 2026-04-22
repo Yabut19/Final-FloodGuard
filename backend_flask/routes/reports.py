@@ -277,33 +277,45 @@ def verify_report(report_id):
     
     # ── Auto-escalate to create official alert ──────────────────────────────────
     alert_creation_warning = None
+    alert_level = None
     try:
         cursor = db.cursor()
-        alert_level = 'advisory' if flood_level in ['low', 'ankle-high'] else \
-                     'warning' if flood_level in ['medium', 'waist-high'] else 'critical'
+        # Map reported level to standardized alert levels
+        f_lvl = (flood_level or '').lower()
+        
+        if f_lvl in ['low', 'ankle-high', 'advisory']:
+            alert_level = 'advisory'
+        elif f_lvl in ['medium', 'waist-high', 'warning']:
+            alert_level = 'warning'
+        elif f_lvl in ['high', 'chest-high', 'critical']:
+            alert_level = 'critical'
+            
+        if alert_level:
 
-        cursor.execute("""
-            INSERT INTO alerts (title, description, level, barangay, status, timestamp, recommended_action, incident_status)
-            VALUES (%s, %s, %s, %s, 'active', NOW(), %s, %s)
-        """, (
-            f"Verified: {report['type']} at {report['location']}",
-            f"Verified by LGU Official ({verified_by})\nUser Report: {report['description']}\nFlood Level: {flood_level}",
-            alert_level,
-            report['location'],
-            recommendations or '',
-            report_status or 'Active'
-        ))
-
-        db.commit()
-        cursor.close()
-
-        # Trigger subscriptions notification
-        try:
-            from routes.subscriptions import auto_escalate
-            with current_app.test_request_context('/api/subscriptions/auto-escalate', method='POST'):
-                auto_escalate()
-        except Exception as e:
-            current_app.logger.warning(f"Auto-escalation failed: {e}")
+            cursor.execute("""
+                INSERT INTO alerts (title, description, level, barangay, status, timestamp, recommended_action, incident_status, source)
+                VALUES (%s, %s, %s, %s, 'active', NOW(), %s, %s, 'report')
+            """, (
+                f"Verified: {report['type']} at {report['location']}",
+                f"Verified by LGU Official ({verified_by})\nUser Report: {report['description']}\nFlood Level: {flood_level}",
+                alert_level,
+                report['location'],
+                recommendations or '',
+                report_status or 'Active'
+            ))
+    
+            db.commit()
+            cursor.close()
+    
+            # Trigger subscriptions notification
+            try:
+                from routes.subscriptions import auto_escalate
+                with current_app.test_request_context('/api/subscriptions/auto-escalate', method='POST'):
+                    auto_escalate()
+            except Exception as e:
+                current_app.logger.warning(f"Auto-escalation failed: {e}")
+        else:
+            cursor.close() # No alert level mapped (e.g. Normal), just finish
 
     except Exception as e:
         logger.error("Error creating alert from verified report: %s", e, exc_info=True)

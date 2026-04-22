@@ -16,53 +16,62 @@ def _emit_sensor_update(payload: dict):
     except Exception as _e:
         print(f"[WS] Broadcast failed: {_e}", flush=True)
 
-# In-memory thresholds — updated via PUT /api/iot/thresholds from admin panel
-_thresholds = {
-    "advisory_cm":  10.0,
-    "warning_cm":   15.0,
-    "critical_cm":  25.0,
-}
+# ── AUTOMATED ALERT STABILITY TRACKER ──────────────────────────────────────────
+# Keeps track of sensors currently in Warning/Critical state to enforce 5s stability
+_pending_alerts = {} # { sensor_id: { "level": str, "start_time": datetime, "triggered": bool } }
 
-def _sync_thresholds_from_db():
-    """Read admin-saved thresholds from system_config and update _thresholds in memory."""
-    try:
-        db = get_db()
-        cur = db.cursor(dictionary=True)
-        cur.execute(
-            "SELECT config_key, config_value FROM system_config "
-            "WHERE config_key IN ('advisory_level','warning_level','critical_level')"
-        )
-        rows = cur.fetchall()
-        cur.close()
-        mapping = {r["config_key"]: float(r["config_value"]) for r in rows}
-        if "advisory_level" in mapping:
-            _thresholds["advisory_cm"] = mapping["advisory_level"]
-        if "warning_level" in mapping:
-            _thresholds["warning_cm"] = mapping["warning_level"]
-        if "critical_level" in mapping:
-            _thresholds["critical_cm"] = mapping["critical_level"]
-    except Exception:
-        pass  # fall back to in-memory defaults
+from utils.thresholds import calculate_status, sync_thresholds_from_db, get_current_thresholds, _thresholds
 
 
 @iot_bp.route("/thresholds", methods=["GET"])
 def get_thresholds():
     """ESP32 calls this every 60 s. Always reflects what admin saved in Threshold Config."""
-    _sync_thresholds_from_db()
+    sync_thresholds_from_db()
     return jsonify(_thresholds), 200
 
 @iot_bp.route("/thresholds", methods=["PUT", "POST"])
 def set_thresholds():
     data = request.get_json(silent=True) or {}
     updated = {}
-    for key in ("advisory_cm", "warning_cm", "critical_cm"):
-        if key in data:
-            try:
-                _thresholds[key] = float(data[key])
-                updated[key] = _thresholds[key]
-            except (TypeError, ValueError):
-                return jsonify({"error": f"Invalid value for {key}"}), 400
-    return jsonify({"message": "Thresholds updated", "thresholds": _thresholds}), 200
+    db = get_db()
+    cur = db.cursor()
+    
+    mapping = {
+        "advisory_cm": "advisory_level",
+        "warning_cm": "warning_level",
+        "critical_cm": "critical_level"
+    }
+    
+    try:
+        for key, db_key in mapping.items():
+            if key in data:
+                val = float(data[key])
+                _thresholds[key] = val
+                updated[key] = val
+                cur.execute(
+                    "INSERT INTO system_config (config_key, config_value) VALUES (%s, %s) "
+                    "ON DUPLICATE KEY UPDATE config_value=VALUES(config_value)",
+                    (db_key, str(val))
+                )
+        db.commit()
+        
+        # Broadcast threshold update to all WebSocket clients (sync with config_bp)
+        try:
+            from app import socketio
+            socketio.emit("threshold_update", {
+                "advisory_level": _thresholds["advisory_cm"],
+                "warning_level": _thresholds["warning_cm"],
+                "critical_level": _thresholds["critical_cm"]
+            }, namespace="/")
+        except:
+            pass
+            
+        return jsonify({"message": "Thresholds updated", "thresholds": _thresholds}), 200
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close()
 
 
 @iot_bp.route("/sensor-readings", methods=["POST"])
@@ -128,55 +137,74 @@ def sensor_reading():
             }), 201
 
         # ── INTEGRATION: Recalculate status based on dynamic thresholds ──
-        _sync_thresholds_from_db()
-        lvl = float(flood_level)
-        new_status = "NORMAL"
-        if lvl >= _thresholds.get("critical_cm", 25.0):
-            new_status = "CRITICAL"
-        elif lvl >= _thresholds.get("warning_cm", 15.0):
-            new_status = "WARNING"
-        elif lvl >= _thresholds.get("advisory_cm", 10.0):
-            new_status = "ADVISORY"
-        
-        # Override incoming status with server-calculated value for baseline sync
-        status = new_status
+        status = calculate_status(flood_level)
 
-        # ── AUTOMATIC ALERT TRIGGERING ──────────────────────────────────
-        if status != "NORMAL":
-            # Prevent alert spam: check if an active alert for this level/location exists from the last 30 minutes
+        # ── AUTOMATED ALERT STABILITY LOGIC ──────────────────────────────────
+        trigger_automated = False
+        if status in ["WARNING", "CRITICAL"]:
+            now = datetime.now()
+            pending = _pending_alerts.get(sensor_id)
+            
+            if not pending or pending["level"] != status:
+                # Start or reset stability timer for this level
+                _pending_alerts[sensor_id] = {"level": status, "start_time": now, "triggered": False}
+            else:
+                # Level matches, check if 5 seconds have passed
+                elapsed = (now - pending["start_time"]).total_seconds()
+                if elapsed >= 5 and not pending["triggered"]:
+                    trigger_automated = True
+                    pending["triggered"] = True
+        else:
+            # Clear pending if status is NORMAL or ADVISORY
+            _pending_alerts.pop(sensor_id, None)
+
+        if trigger_automated:
+            # Verify sensor metadata again for alert context
+            # Prevent alert spam: check if an active alert for this level/location exists from the last 15 minutes
             cur.execute("""
                 SELECT id FROM alerts 
                 WHERE barangay = %s AND level = %s AND status = 'active'
-                AND timestamp > DATE_SUB(NOW(), INTERVAL 30 MINUTE)
+                AND timestamp > DATE_SUB(NOW(), INTERVAL 15 MINUTE)
                 LIMIT 1
             """, (sensor_barangay, status.lower()))
             
             if not cur.fetchone():
-                # Define recommended actions based on severity baseline
-                action = "Monitor the situation and stay alert."
-                if status == "CRITICAL":
-                    action = "Immediate evacuation may be required. Proceed to the nearest center."
-                elif status == "WARNING":
-                    action = "Prepare emergency kits and secure belongings."
-                elif status == "ADVISORY":
-                    action = "Stay tuned for further updates."
+                # Recommended Actions (STRICT)
+                action = "Be ready for Evacuation" if status == "WARNING" else "Evacuate now"
+                
+                # Automated Alert Content (STRICT FORMAT)
+                dt_str = datetime.now().strftime("%B %d, %Y - %I:%M %p")
+                headline = f"AUTOMATED FLOOD {status} ALERT"
+                
+                full_description = (
+                    f"{headline}\n"
+                    f"Classification: {status}\n"
+                    f"Location: Brgy. {sensor_barangay}\n"
+                    f"Date/Time: {dt_str}\n"
+                    f"Recommended Action: {action}"
+                )
 
                 cur.execute("""
                     INSERT INTO alerts (title, description, level, barangay, recommended_action, status, timestamp)
                     VALUES (%s, %s, %s, %s, %s, 'active', NOW())
-                """, (f"{status.capitalize()} Flood Alert: {sensor_name}", 
-                      f"Detected flood level: {lvl}cm in {sensor_barangay}.", 
-                      status.lower(), sensor_barangay, action))
+                """, (f"Automated {status} Alert: {sensor_name}", 
+                      full_description, status.lower(), sensor_barangay, action))
+                
+                db.commit() # Commit alert before broadcasting
+                alert_id = cur.lastrowid
 
                 # ── REAL-TIME BROADCAST: Deliver auto-alert instantly ──
                 try:
                     from app import socketio
                     socketio.emit("new_notification", {
                         "type": "auto_alert",
-                        "title": f"{status.capitalize()} Flood Alert: {sensor_name}",
-                        "description": f"Flood level: {lvl}cm in {sensor_barangay}.",
+                        "id": alert_id,
+                        "title": f"Automated {status} Alert: {sensor_name}",
+                        "description": full_description,
                         "level": status.lower(),
-                        "barangay": sensor_barangay
+                        "barangay": sensor_barangay,
+                        "recommended_action": action,
+                        "timestamp": datetime.now().isoformat()
                     }, namespace="/")
                 except: pass
 
@@ -243,9 +271,8 @@ def latest_sensor():
 
     age_seconds = (datetime.now() - last_update_dt).total_seconds()
     is_offline = age_seconds > 5 or row.get("sensor_status") == "inactive"
-
     row["is_offline"] = is_offline
-    row["status"] = "OFFLINE" if is_offline else (row.get("status") or "UNKNOWN")
+    row["status"] = calculate_status(row.get("flood_level") or 0, is_offline)
 
     try:
         # Force 0cm if offline OR manually inactive per requirements
@@ -319,22 +346,13 @@ def sensor_status():
             "sensor_id": row.get("sensor_id")
         }), 200
 
-    try:
-        flood_level = float(row.get("flood_level") or 0)
-    except Exception:
-        flood_level = 0.0
-
-    try:
-        raw_distance = float(row.get("raw_distance") or 0)
-    except Exception:
-        raw_distance = 0.0
-
+    flood_level = float(row.get("flood_level") or 0)
     return jsonify({
         "status": "ONLINE",
         "flood_level": flood_level,
-        "raw_distance": raw_distance,
+        "raw_distance": float(row.get("raw_distance") or 0),
         "sensor_id": row.get("sensor_id"),
-        "sensor_status": row.get("status")  # NORMAL / WARNING / ALARM
+        "sensor_status": calculate_status(flood_level)
     }), 200
 
 
@@ -376,7 +394,7 @@ def sensor_by_location():
     is_offline = age_seconds > 5
 
     row["is_offline"] = is_offline
-    row["status"] = "OFFLINE" if is_offline else (row.get("status") or "UNKNOWN")
+    row["status"] = calculate_status(row.get("flood_level") or 0, is_offline)
 
     try:
         row["flood_level"] = float(row.get("flood_level") or 0)
@@ -479,7 +497,7 @@ def get_all_sensors_status():
                 else:
                     s['flood_level'] = float(latest['flood_level']) if latest['flood_level'] else 0
                     s['raw_distance'] = float(latest['raw_distance']) if latest.get('raw_distance') else 0
-                    s['reading_status'] = latest['reading_status']
+                    s['reading_status'] = calculate_status(s['flood_level'])
             else:
                 s['flood_level'] = 0
                 s['raw_distance'] = 0
@@ -752,12 +770,11 @@ def stream():
                     age = (datetime.now() - created_at_dt).total_seconds()
                     is_offline = age > 15 or row.get("sensor_status") == "inactive"
 
-                    _sync_thresholds_from_db()
                     payload = {
                         "sensor_id":    row.get("sensor_id"),
                         "flood_level":  0.0 if is_offline else float(row.get("flood_level") or 0),
                         "raw_distance": 0.0 if is_offline else float(row.get("raw_distance") or 0),
-                        "status":       "OFFLINE" if is_offline else (row.get("status") or "NORMAL"),
+                        "status":       calculate_status(row.get("flood_level") or 0, is_offline),
                         "latitude":     float(row["latitude"]) if row.get("latitude") else None,
                         "longitude":    float(row["longitude"]) if row.get("longitude") else None,
                         "maps_url":     row.get("maps_url"),
@@ -886,7 +903,7 @@ def live_stream():
 
                 cur.close()
 
-                _sync_thresholds_from_db()
+                sync_thresholds_from_db()
                 payload = {
                     "sensors":       sensors,
                     "active_alerts": active_alerts,

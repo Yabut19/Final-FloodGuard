@@ -383,7 +383,10 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
                                                 <TouchableOpacity style={styles.userActionButton} onPress={() => handleEditClick(center)}>
                                                     <Feather name="edit-2" size={16} color="#2563eb" />
                                                 </TouchableOpacity>
-                                                <TouchableOpacity style={styles.userActionButton} onPress={() => handleDeleteCenter(center.id)}>
+                                                <TouchableOpacity
+                                                    style={[styles.userActionButton, { backgroundColor: '#ffffff', borderColor: '#e2e8f0' }]}
+                                                    onPress={() => handleDeleteCenter(center.id)}
+                                                >
                                                     <Feather name="trash-2" size={16} color="#dc2626" />
                                                 </TouchableOpacity>
                                             </View>
