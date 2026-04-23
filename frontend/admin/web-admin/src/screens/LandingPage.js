@@ -270,12 +270,18 @@ const LandingPage = ({ onLoginSuccess, onNavigatePublic, initialLoginOpen, reset
                 password: password,
                 required_role: accessLevel // 'admin' or 'lgu'
             };
-            const loginPromise = fetch(`${API_BASE_URL}/api/auth/login`, {
+            
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+            
+            const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),
+                signal: controller.signal
             });
-            const response = await loginPromise;
+            clearTimeout(timeoutId);
+            
             const text = await response.text();
             let data = {};
             try { data = JSON.parse(text); } catch (e) { data = { error: text } }
@@ -302,7 +308,11 @@ const LandingPage = ({ onLoginSuccess, onNavigatePublic, initialLoginOpen, reset
             }
         } catch (err) {
             console.error("Login error:", err);
-            setError("Unable to connect to server.");
+            if (err.name === 'AbortError') {
+                setError("Connection timeout. Please check your network and try again.");
+            } else {
+                setError("Unable to connect to server. Please check if the server is running.");
+            }
         } finally {
             setIsLoading(false);
         }
@@ -809,9 +819,7 @@ const localStyles = StyleSheet.create({
         fontSize: Platform.OS === 'web' && window.innerWidth > 768 ? 200 : 100, // Increased from 160/84
         fontFamily: 'Poppins_700Bold',
         letterSpacing: -2,
-        textShadowColor: 'rgba(123, 189, 232, 0.4)',
-        textShadowOffset: { width: 0, height: 0 },
-        textShadowRadius: 20,
+        textShadow: '0px 0px 20px rgba(123, 189, 232, 0.4)',
         textAlign: 'center',
         includeFontPadding: false,
         lineHeight: Platform.OS === 'web' && window.innerWidth > 768 ? 210 : 110, // Increased to prevent clipping

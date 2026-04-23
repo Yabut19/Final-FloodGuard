@@ -7,6 +7,7 @@ import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
 import { API_BASE_URL } from "../config/api";
 import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
+import { authFetch } from "../utils/helpers";
 import useDataSync from "../utils/useDataSync";
 
 const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
@@ -42,10 +43,10 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
         setIsLoading(true);
         try {
             const [summaryRes, historyRes, sensorsRes, reportsRes] = await Promise.all([
-                fetch(`${API_BASE_URL}/api/reports/summary`),
-                fetch(`${API_BASE_URL}/api/reports/history?sensor_id=${selectedSensor.id}`),
-                fetch(`${API_BASE_URL}/api/iot/sensors/status-all`),
-                fetch(`${API_BASE_URL}/api/reports/`)
+                authFetch(`${API_BASE_URL}/api/reports/summary`),
+                authFetch(`${API_BASE_URL}/api/reports/history?sensor_id=${selectedSensor.id}`),
+                authFetch(`${API_BASE_URL}/api/iot/sensors/status-all`),
+                authFetch(`${API_BASE_URL}/api/reports/`)
             ]);
 
             const summary = await summaryRes.json();
@@ -62,7 +63,7 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             setFloodHistory(history);
             setCommunityReports(reportsData);
 
-            if (sensorsData) {
+            if (Array.isArray(sensorsData)) {
                 const dynamicSensors = sensorsData.map(s => ({
                     id: s.id,
                     name: s.name || s.id,
@@ -81,11 +82,12 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     useEffect(() => {
         const fetchSystemStatus = async () => {
             try {
-                const res = await fetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
+                const res = await authFetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
                 if (res.ok) {
                     const data = await res.json();
-                    const online = data.filter(s => !s.is_offline).length;
-                    setOnlineSensors(online);
+                    // Only count sensors that are both physically Live and software Enabled
+                    const live = data.filter(s => s.is_live && s.enabled !== false).length;
+                    setOnlineSensors(live);
                 }
             } catch (e) {
                 console.error("Status fetch error:", e);
@@ -104,6 +106,11 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     // ── Real-time Data Synchronization ──
     useDataSync({
         onSensorUpdate: (reading) => {
+            // Only process if sensor is LIVE and ENABLED per requirement
+            const isLive = reading.is_live ?? true;
+            const isEnabled = reading.enabled ?? true;
+            if (!isLive || !isEnabled) return;
+
             // 1. Update analytics counts
             setAnalytics(prev => prev.map(item => {
                 if (item.label === "Collected Data") return { ...item, value: (parseInt(item.value) || 0) + 1 };
@@ -127,22 +134,14 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                     level: `${reading.flood_level} cm`,
                     sensor: sensorObj.name,
                     location: sensorObj.barangay || "General Area",
-                    status: (reading.status || "Normal").charAt(0).toUpperCase() + (reading.status || "Normal").slice(1).toLowerCase()
+                    status: (reading.status || "Normal").toUpperCase()
                 };
                 setFloodHistory(prev => [newRow, ...prev].slice(0, 50));
             }
         },
         onReportUpdate: () => {
             console.log("[DataReports] Reports updated, refreshing list...");
-            fetch(`${API_BASE_URL}/api/reports/`)
-                .then(res => res.json())
-                .then(data => {
-                    setCommunityReports(data);
-                    setAnalytics(prev => prev.map(item => 
-                        item.label === "Reports" ? { ...item, value: data.length } : item
-                    ));
-                })
-                .catch(err => console.error("Live reports refresh failed:", err));
+            fetchData();
         },
         onSensorListUpdate: () => {
             console.log("[DataReports] Sensor list updated, refreshing...");

@@ -26,9 +26,8 @@ app.config.from_object(Config)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # ── WebSocket (Socket.IO) ──────────────────────────────────────────────────────
-# 'threading' mode is used for compatibility with Python 3.13/3.14.
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading",
-                    logger=False, engineio_logger=False)
+from socket_instance import socketio
+socketio.init_app(app)
 
 # Auto-apply DB column migrations on startup
 try:
@@ -80,9 +79,15 @@ def on_connect():
             for key, val in row.items():
                 if isinstance(val, decimal.Decimal):
                     row[key] = float(val)
+                elif isinstance(val, datetime):
+                    row[key] = val.isoformat()
             
-            if hasattr(row["created_at"], "isoformat"):
-                row["timestamp"] = row["created_at"].isoformat()
+            # Ensure created_at is serialized
+            if isinstance(row.get("created_at"), datetime):
+                row["created_at"] = row["created_at"].isoformat()
+            elif hasattr(row.get("created_at"), "isoformat"):
+                row["created_at"] = row["created_at"].isoformat()
+            
             from utils.thresholds import calculate_status
             row["status"] = calculate_status(row["flood_level"])
             socketio.emit("sensor_update", row)

@@ -6,12 +6,12 @@ import { styles } from "../styles/globalStyles";
 import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
 import { API_BASE_URL } from "../config/api";
+import { formatPST } from "../utils/dateUtils";
+import { authFetch } from "../utils/helpers";
 import useSensorSocket from "../utils/useSensorSocket";
-import dialogs from "../utils/dialogs";
-import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
 
 const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
-    const isSuperAdmin = userRole === "superadmin" || userRole === "lgu";
+    const isSuperAdmin = userRole === "superadmin";
     const [activeTab, setActiveTab] = useState(isSuperAdmin ? "sensors" : "map"); // "map" | "sensors"
     const [sensors, setSensors] = useState([]);
     const [liveSensors, setLiveSensors] = useState([]);
@@ -20,9 +20,16 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const [showRegistrationModal, setShowRegistrationModal] = useState(false);
     const [showStatusModal, setShowStatusModal] = useState(false);
     const [selectedSensorHealth, setSelectedSensorHealth] = useState(null);
+    const [showSuccessModal, setShowSuccessModal] = useState(false);
+    const [successMessage, setSuccessMessage] = useState("");
+    const [errorMessage, setErrorMessage] = useState("");
+    const [showErrorModal, setShowErrorModal] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [statusFilter, setStatusFilter] = useState("All Status");
     const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+    const [togglingId, setTogglingId] = useState(null);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [sensorToDelete, setSensorToDelete] = useState(null);
     const healthIntervalRef = useRef(null);
 
     const [formData, setFormData] = useState({
@@ -31,7 +38,7 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
         battery_level: "100", signal_strength: "strong"
     });
 
-    // ── Map state ─────────────────────────────────────────────────
+    // Map state
     const [selectedSensor, setSelectedSensor] = useState(null);
     const mapInitRef = useRef(false);
 
@@ -126,59 +133,252 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 const marker = window.L.circleMarker([lat, lng], {
                     radius: 11, fillColor: color, color: "#fff", weight: 3, opacity: 1, fillOpacity: 1,
                 }).addTo(mapInstance);
-                marker.bindPopup(`<b>${s.name}</b><br>Brgy. ${s.barangay || "—"}<br>Status: ${status.toUpperCase()}<br>Flood: ${s.flood_level || 0}cm<br>${s.is_offline ? '<span style="color:red">⚠ OFFLINE</span>' : '<span style="color:green">● ONLINE</span>'}`);
+                marker.bindPopup(`<b>${s.name}</b><br>Brgy. ${s.barangay || "—"}</br>Status: ${status.toUpperCase()}<br>Flood: ${s.flood_level || 0}cm<br>${s.is_offline ? '<span style="color:red">⚠️ OFFLINE</span>' : '<span style="color:green">✅ ONLINE</span>'}`);
                 marker.on('click', () => setSelectedSensor(s.id));
             } catch (e) { }
         });
     }, [liveSensors, activeTab]);
 
-    // ── Fetch registered sensors ──────────────────────────────────
-    const fetchSensors = async () => {
+    // Get auth headers for API calls
+    const getAuthHeaders = () => {
+        const token = localStorage.getItem("authToken");
+        return {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : ""
+        };
+    };
+
+    const showErr = (msg) => {
+        setErrorMessage(msg);
+        setShowErrorModal(true);
+    };
+
+    const resetForm = () => {
+        setFormData({
+            id: "", name: "", barangay: "", description: "",
+            lat: "", lng: "", status: "active",
+            battery_level: "100", signal_strength: "strong"
+        });
+    };
+
+    const handleInputChange = (key, value) => {
+        setFormData(prev => ({ ...prev, [key]: value }));
+    };
+
+    const handleRegisterSensor = async () => {
+        if (!formData.id || !formData.name || !formData.barangay || !formData.lat || !formData.lng) {
+            showErr("Please fill in all required fields marked with *");
+            return;
+        }
         setLoading(true);
         try {
-            const res = await fetch(`${API_BASE_URL}/api/iot/sensors`);
+            const res = await authFetch(`${API_BASE_URL}/api/iot/registers-sensor`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(formData)
+            });
             const data = await res.json();
-            if (res.ok) setSensors(data.sensors || []);
-        } catch (e) { console.warn("fetchSensors error", e); }
-        finally { setLoading(false); }
-    };
-
-    // ── Fetch live health data ────────────────────────────────────
-    const fetchHealthData = async () => {
-        setHealthLoading(true);
-        try {
-            const res = await fetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
             if (res.ok) {
-                const data = await res.json();
-                setLiveSensors(data);
+                setSuccessMessage(`Sensor "${formData.name}" registered successfully!`);
+                setShowSuccessModal(true);
+                setShowRegistrationModal(false);
+                resetForm();
+                fetchSensors();
+                fetchHealthData();
+            } else {
+                showErr(data.error || "Failed to register sensor");
             }
-        } catch (e) { console.warn("fetchHealthData error", e); }
-        finally { setHealthLoading(false); }
+        } catch (e) {
+            showErr("Network error while registering sensor");
+        } finally {
+            setLoading(false);
+        }
     };
 
-    useEffect(() => {
-        fetchSensors();
-        fetchHealthData();
-        healthIntervalRef.current = setInterval(fetchHealthData, 30000);
-        return () => { clearInterval(healthIntervalRef.current); };
-    }, []);
+    const handleDeleteSensor = async (id) => {
+        setLoading(true);
+        try {
+            const res = await authFetch(`${API_BASE_URL}/api/iot/sensors/${id}`, {
+                method: "DELETE"
+            });
+            if (res.ok) {
+                setSuccessMessage("Sensor deleted successfully");
+                setShowSuccessModal(true);
+                setShowDeleteModal(false);
+                setSensorToDelete(null);
+                fetchSensors();
+                fetchHealthData();
+            } else {
+                const data = await res.json();
+                showErr(data.error || "Failed to delete sensor");
+            }
+        } catch (e) {
+            showErr("Network error while deleting sensor");
+        } finally {
+            setLoading(false);
+        }
+    };
 
-    // ── Real-time WebSocket: instantly patch readings without polling ────────
-    useSensorSocket((reading) => {
-        setLiveSensors(prev => prev.map(s => {
-            if (s.id !== reading.sensor_id) return s;
-            return {
-                ...s,
-                flood_level: Number(reading.flood_level ?? 0),
-                raw_distance: Number(reading.raw_distance ?? 0),
-                reading_status: reading.status || s.reading_status,
-                is_offline: reading.is_offline || false,
-            };
-        }));
+    const confirmDelete = () => {
+        if (sensorToDelete) {
+            handleDeleteSensor(sensorToDelete.id);
+        }
+    };
+
+    const cancelDelete = () => {
+        setShowDeleteModal(false);
+        setSensorToDelete(null);
+    };
+
+    const fetchSensors = async () => {
+    setLoading(true);
+    try {
+        const res = await authFetch(`${API_BASE_URL}/api/iot/sensors`);
+        const data = await res.json();
+        if (res.ok) setSensors(data.sensors || []);
+    } catch (e) { console.warn("fetchSensors error", e); }
+    finally { setLoading(false); }
+};
+
+// Fetch live health data with safe initialization
+const fetchHealthData = async (preserveLiveState = false) => {
+    setHealthLoading(true);
+    try {
+        const res = await authFetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
+        if (res.ok) {
+            const data = await res.json();
+            if (preserveLiveState) {
+                // Preserve existing live/disconnected state, only update other fields
+                setLiveSensors(prev => {
+                    if (!Array.isArray(prev)) return [];
+                    return prev.map(existingSensor => {
+                        const apiSensor = Array.isArray(data) ? data.find(s => s.id === existingSensor.id) : null;
+                        if (!apiSensor) return existingSensor;
+                        
+                        return {
+                            ...existingSensor,
+                            // Preserve live state and last_seen
+                            is_live: existingSensor.is_live,
+                            is_offline: existingSensor.is_offline,
+                            last_seen: existingSensor.last_seen,
+                            // Update other fields from API
+                            flood_level: apiSensor.flood_level,
+                            raw_distance: apiSensor.raw_distance,
+                            reading_status: apiSensor.reading_status,
+                            enabled: apiSensor.enabled,
+                        };
+                    });
+                });
+            } else {
+                // Initial load - ensure all sensors default to Disconnected
+                const initializedData = Array.isArray(data) ? data.map(sensor => ({
+                    ...sensor,
+                    is_live: false, // Default to Disconnected
+                    is_offline: true,
+                    last_seen: null, // No last_seen until real data arrives
+                })) : [];
+                setLiveSensors(initializedData);
+            }
+        }
+    } catch (e) { console.warn("fetchHealthData error", e); }
+    finally { setHealthLoading(false); }
+};
+
+useEffect(() => {
+    // Add error boundary for data fetching
+    try {
+        fetchSensors();
+        fetchHealthData(); // Initial load with default Disconnected state
+        // Set up periodic fetching with preserveLiveState=true to maintain status
+        healthIntervalRef.current = setInterval(() => fetchHealthData(true), 30000);
+    } catch (error) {
+        console.warn("Error in initial data loading:", error);
+    }
+    return () => { 
+        if (healthIntervalRef.current) {
+            clearInterval(healthIntervalRef.current); 
+        }
+    };
+}, []);
+
+// Timeout mechanism to mark sensors as Disconnected when data stops
+const timeoutRef = useRef(null);
+    
+useEffect(() => {
+    // Check for sensors that haven't sent data recently (timeout after 35 seconds)
+    const checkSensorTimeouts = () => {
+        setLiveSensors(prev => {
+            if (!Array.isArray(prev)) return [];
+            const now = new Date();
+            const timeoutMs = 35000; // 35 seconds
+            
+            return prev.map(s => {
+                if (!s) return s;
+                
+                // If sensor was Live but hasn't sent data recently, mark as Disconnected
+                if (s.is_live && s.last_seen) {
+                    const lastSeenTime = new Date(s.last_seen);
+                    const timeSinceLastData = now - lastSeenTime;
+                    
+                    if (timeSinceLastData > timeoutMs) {
+                        return {
+                            ...s,
+                            is_live: false, // Mark as Disconnected
+                            is_offline: true,
+                        };
+                    }
+                }
+                
+                // Default sensors without last_seen to Disconnected
+                if (!s.last_seen) {
+                    return {
+                        ...s,
+                        is_live: false,
+                        is_offline: true,
+                    };
+                }
+                
+                return s;
+            });
+        });
+    };
+    
+    // Run timeout check every 10 seconds
+    timeoutRef.current = setInterval(checkSensorTimeouts, 10000);
+    
+    return () => {
+        if (timeoutRef.current) {
+            clearInterval(timeoutRef.current);
+        }
+    };
+}, []);
+
+// Real-time WebSocket: instantly patch readings without polling
+useSensorSocket((reading) => {
+    if (!reading || !reading.sensor_id) return;
+    
+    try {
+        setLiveSensors(prev => {
+            if (!Array.isArray(prev)) return [];
+            return prev.map(s => {
+                if (!s || s.id !== reading.sensor_id) return s;
+                // Sensor is Live only when actively sending data
+                return {
+                    ...s,
+                    flood_level: Number(reading.flood_level ?? 0),
+                    raw_distance: Number(reading.raw_distance ?? 0),
+                    reading_status: reading.status || s.reading_status,
+                    is_live: true, // Set to Live when receiving data
+                    enabled: reading.enabled ?? true,
+                    is_offline: false, // Not offline when receiving data
+                    last_seen: new Date().toISOString(), // Track when data was last received
+                };
+            });
+        });
+        
         // Also auto-update the selected sensor health modal if open
         setSelectedSensorHealth(prev => {
-            if (!prev) return prev;
-            if (prev.id !== reading.sensor_id) return prev;
+            if (!prev || prev.id !== reading.sensor_id) return prev;
             return {
                 ...prev,
                 live: {
@@ -186,158 +386,143 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                     flood_level: Number(reading.flood_level ?? 0),
                     raw_distance: Number(reading.raw_distance ?? 0),
                     reading_status: reading.status,
-                    is_offline: reading.is_offline || false,
+                    is_live: true, // Set to Live when receiving data
+                    enabled: reading.enabled ?? true,
+                    is_offline: false, // Not offline when receiving data
+                    last_seen: new Date().toISOString(), // Track when data was last received
                 }
             };
         });
-    });
+    } catch (error) {
+        console.error("Error processing WebSocket update:", error);
+    }
+});
 
-    // ── Animation for blinking dots ───────────────────────────────
-    const blinkAnim = useRef(new Animated.Value(1)).current;
-    useEffect(() => {
-        const animation = Animated.loop(
-            Animated.sequence([
-                Animated.timing(blinkAnim, { toValue: 0.2, duration: 1000, useNativeDriver: true }),
-                Animated.timing(blinkAnim, { toValue: 1, duration: 1000, useNativeDriver: true })
-            ])
-        );
-        animation.start();
-        return () => animation.stop();
-    }, []);
+// Animation for blinking dots
+const blinkAnim = useRef(new Animated.Value(1)).current;
+useEffect(() => {
+    const animation = Animated.loop(
+        Animated.sequence([
+            Animated.timing(blinkAnim, { toValue: 0.2, duration: 1000, useNativeDriver: Platform.OS !== 'web' }),
+            Animated.timing(blinkAnim, { toValue: 1, duration: 1000, useNativeDriver: Platform.OS !== 'web' })
+        ])
+    );
+    animation.start();
+    return () => animation.stop();
+}, []);
 
-    const handleInputChange = (field, value) => setFormData(prev => ({ ...prev, [field]: value }));
-
-    const resetForm = () => {
-        setFormData({ id: "", name: "", barangay: "", description: "", lat: "", lng: "", status: "active", battery_level: "100", signal_strength: "strong" });
-    };
-
-    const handleRegisterSensor = async () => {
-        if (!formData.id.trim()) return dialogs.error("Validation Error", "Sensor ID is required");
-        if (!formData.name.trim()) return dialogs.error("Validation Error", "Sensor Name is required");
-        if (!formData.barangay.trim()) return dialogs.error("Validation Error", "Barangay is required");
-        if (!formData.lat || !formData.lng) return dialogs.error("Validation Error", "Latitude and Longitude are required");
-        const lat = parseFloat(formData.lat), lng = parseFloat(formData.lng);
-        if (isNaN(lat) || isNaN(lng)) return dialogs.error("Validation Error", "Coordinates must be valid numbers");
-        if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return dialogs.error("Validation Error", "Invalid coordinates");
-
-        setLoading(true);
-        try {
-            const res = await fetch(`${API_BASE_URL}/api/iot/registers-sensor`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    id: formData.id, name: formData.name, barangay: formData.barangay,
-                    description: formData.description, lat, lng, status: formData.status,
-                    battery_level: parseInt(formData.battery_level),
-                    signal_strength: formData.signal_strength
-                })
+const handleToggleSensor = async (sensor, enabled) => {
+    setTogglingId(sensor.id);
+    try {
+        const res = await authFetch(`${API_BASE_URL}/api/iot/sensors/${sensor.id}/toggle`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            // Update enabled state and suppress data if OFF
+            setLiveSensors(prev => {
+                if (!Array.isArray(prev)) return [];
+                return prev.map(s => {
+                    if (!s || s.id !== sensor.id) return s;
+                    return {
+                        ...s,
+                        enabled: enabled,
+                        // If sensor is turned OFF, suppress all data display
+                        flood_level: enabled ? s.flood_level : 0,
+                        raw_distance: enabled ? s.raw_distance : 0,
+                        reading_status: enabled ? s.reading_status : null,
+                        // Preserve is_live and is_offline status
+                    };
+                });
             });
-            const data = await res.json();
-            if (res.ok) {
-                setShowRegistrationModal(false);
-                dialogs.success("Success!", `Sensor "${formData.name}" registered successfully!`);
-                resetForm();
-                fetchSensors();
-                fetchHealthData();
-            } else {
-                dialogs.error("Error", data.error || "Registration failed");
-            }
-        } catch (e) {
-            dialogs.error("Error", "Network error during registration");
+            setSuccessMessage(`Sensor "${sensor.name}" turned ${enabled ? "ON" : "OFF"} successfully!`);
+            setShowSuccessModal(true);
+        } else {
+            showErr(data.error || "Failed to toggle sensor");
         }
-        setLoading(false);
+    } catch (e) {
+        showErr("Network error while toggling sensor");
+    } finally {
+        setTogglingId(null);
+    }
+};
+
+const filteredSensors = sensors.filter(s => {
+    const q = searchQuery.toLowerCase();
+    const matchSearch = s.name?.toLowerCase().includes(q) || s.id?.toLowerCase().includes(q) || s.barangay?.toLowerCase().includes(q);
+
+    const live = liveSensors.find(ls => ls.id === s.id);
+    const isLive = live && live.is_live;
+    const isEnabled = live && live.enabled !== false;
+
+    let matchStatus = true;
+    if (statusFilter === "Live") matchStatus = isLive;
+    else if (statusFilter === "Disconnected") matchStatus = !isLive;
+    else if (statusFilter === "Warning") matchStatus = isLive && isEnabled && live?.reading_status === "WARNING";
+    else if (statusFilter === "Critical") matchStatus = isLive && isEnabled && (live?.reading_status === "ALARM" || live?.reading_status === "CRITICAL");
+    else if (statusFilter !== "All Status") matchStatus = s.status === statusFilter;
+
+    return matchSearch && matchStatus;
+});
+
+const getStatusBadge = (status) => {
+    const map = {
+        active: { bg: "#dcfce7", text: "#166534", border: "#86efac" },
+        inactive: { bg: "#f1f5f9", text: "#64748b", border: "#cbd5e1" },
+        maintenance: { bg: "#fef3c7", text: "#92400e", border: "#fcd34d" },
+        OFFLINE: { bg: "#f1f5f9", text: "#64748b", border: "#cbd5e1" },
+        NORMAL: { bg: "#dcfce7", text: "#166534", border: "#86efac" },
+        WARNING: { bg: "#fef3c7", text: "#92400e", border: "#fcd34d" },
+        CRITICAL: { bg: "#fee2e2", text: "#dc2626", border: "#fca5a5" },
     };
+    return map[status] || { bg: "#f1f5f9", text: "#64748b", border: "#e2e8f0" };
+};
 
-    const handleDeleteSensor = async (sensorId) => {
-        const result = await dialogs.confirm("Delete Sensor", `Are you sure you want to delete sensor "${sensorId}"?`);
-        if (!result.isConfirmed) return;
-        try {
-            const res = await fetch(`${API_BASE_URL}/api/iot/sensors/${sensorId}`, { method: "DELETE" });
-            const data = await res.json();
-            if (res.ok) {
-                dialogs.success("Deleted", data.message || "Sensor deleted successfully");
-                fetchSensors();
-                fetchHealthData();
-            } else {
-                dialogs.error("Error", data.error || "Failed to delete sensor");
-            }
-        } catch (e) {
-            dialogs.error("Error", "Network error while deleting sensor");
-        }
-    };
+const getBatteryColor = (level) => {
+    if (!level || level === "No Signal") return "#94a3b8";
+    const n = parseInt(level);
+    if (n >= 80) return "#16a34a";
+    if (n >= 40) return "#f59e0b";
+    return "#dc2626";
+};
 
+// Computed health summary
+const totalSensors = liveSensors.length;
+const onlineSensors = liveSensors.filter(s => s.is_live).length;
+const offlineSensors = liveSensors.filter(s => !s.is_live).length;
+const warningSensors = liveSensors.filter(s => s.is_live && s.enabled && s.reading_status === "WARNING").length;
+const criticalSensors = liveSensors.filter(s => s.is_live && s.enabled && (s.reading_status === "ALARM" || s.reading_status === "CRITICAL")).length;
 
-    // ── Toggle sensor on/off ──────────────────────────────────────
-    const [togglingId, setTogglingId] = useState(null);
-
-    const handleToggleSensor = async (sensor, enabled) => {
-        setTogglingId(sensor.id);
-        try {
-            const res = await fetch(`${API_BASE_URL}/api/iot/sensors/${sensor.id}/toggle`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ enabled })
+// Update WebSocket handler to respect enabled state
+useSensorSocket((reading) => {
+    if (!reading || !reading.sensor_id) return;
+    
+    try {
+        setLiveSensors(prev => {
+            if (!Array.isArray(prev)) return [];
+            return prev.map(s => {
+                if (!s || s.id !== reading.sensor_id) return s;
+                // Only update data if sensor is enabled
+                if (!s.enabled) return s;
+                
+                return {
+                    ...s,
+                    flood_level: Number(reading.flood_level ?? 0),
+                    raw_distance: Number(reading.raw_distance ?? 0),
+                    reading_status: reading.status || s.reading_status,
+                    is_live: true,
+                    enabled: reading.enabled ?? true,
+                    is_offline: false,
+                    last_seen: new Date().toISOString(),
+                };
             });
-            const data = await res.json();
-            if (res.ok) {
-                // Re-fetch live data so card grid updates
-                await fetchHealthData();
-                setSuccessMessage(`Sensor "${sensor.name}" turned ${enabled ? "ON" : "OFF"} successfully!`);
-                setShowSuccessModal(true);
-            } else {
-                showErr(data.error || "Failed to toggle sensor");
-            }
-        } catch (e) {
-            showErr("Network error while toggling sensor");
-        } finally {
-            setTogglingId(null);
-        }
-    };
-
-    const filteredSensors = sensors.filter(s => {
-        const q = searchQuery.toLowerCase();
-        const matchSearch = s.name?.toLowerCase().includes(q) || s.id?.toLowerCase().includes(q) || s.barangay?.toLowerCase().includes(q);
-
-        const live = liveSensors.find(ls => ls.id === s.id);
-        const isOnline = live && !live.is_offline;
-
-        let matchStatus = true;
-        if (statusFilter === "Online") matchStatus = isOnline;
-        else if (statusFilter === "Offline") matchStatus = !isOnline;
-        else if (statusFilter === "Warning") matchStatus = isOnline && live?.reading_status === "WARNING";
-        else if (statusFilter === "Critical") matchStatus = isOnline && (live?.reading_status === "WARNING" || live?.reading_status === "CRITICAL");
-        else if (statusFilter !== "All Status") matchStatus = s.status === statusFilter;
-
-        return matchSearch && matchStatus;
-    });
-
-    const getStatusBadge = (status) => {
-        const map = {
-            active: { bg: "#dcfce7", text: "#166534", border: "#86efac" },
-            inactive: { bg: "#f1f5f9", text: "#64748b", border: "#cbd5e1" },
-            maintenance: { bg: "#fef3c7", text: "#92400e", border: "#fcd34d" },
-            OFFLINE: { bg: "#f1f5f9", text: "#64748b", border: "#cbd5e1" },
-            NORMAL: { bg: "#dcfce7", text: "#166534", border: "#86efac" },
-            WARNING: { bg: "#fff7ed", text: "#ea580c", border: "#fed7aa" },
-            CRITICAL: { bg: "#fef2f2", text: "#dc2626", border: "#fca5a5" },
-        };
-        return map[status] || { bg: "#f1f5f9", text: "#64748b", border: "#e2e8f0" };
-    };
-
-    const getBatteryColor = (level) => {
-        if (!level || level === "No Signal") return "#94a3b8";
-        const n = parseInt(level);
-        if (n >= 70) return "#16a34a";
-        if (n >= 40) return "#f59e0b";
-        return "#dc2626";
-    };
-
-    // ── Computed health summary ─────────────────────────────────
-    const totalSensors = liveSensors.length;
-    const onlineSensors = liveSensors.filter(s => !s.is_offline).length;
-    const offlineSensors = liveSensors.filter(s => s.is_offline).length;
-    const warningSensors = liveSensors.filter(s => !s.is_offline && s.reading_status === "WARNING").length;
-    const criticalSensors = liveSensors.filter(s => !s.is_offline && (s.reading_status === "ALARM" || s.reading_status === "CRITICAL")).length;
+        });
+    } catch (error) {
+        console.error("Error processing WebSocket update:", error);
+    }
+});
 
     return (
         <View style={styles.dashboardRoot}>
@@ -351,10 +536,10 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                         <Text style={styles.dashboardTopSubtitle}>Register, monitor, and manage your sensor network</Text>
                     </View>
                     <View style={styles.dashboardTopRight}>
-                        <View style={[styles.dashboardStatusPill, { backgroundColor: onlineSensors >= 1 ? "rgba(22, 163, 74, 0.1)" : "rgba(100, 116, 139, 0.1)" }]}>
-                            <View style={[styles.dashboardStatusDot, { backgroundColor: getSystemStatusColor(onlineSensors) }]} />
-                            <Text style={[styles.dashboardStatusText, { color: getSystemStatusColor(onlineSensors) }]}>
-                                {getSystemStatus(onlineSensors)}
+                        <View style={styles.dashboardStatusPill}>
+                            <View style={styles.dashboardStatusDot} />
+                            <Text style={styles.dashboardStatusText}>
+                                {onlineSensors}/{totalSensors} Live
                             </Text>
                         </View>
                         <RealTimeClock style={styles.dashboardTopDate} />
@@ -379,9 +564,7 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                     </TouchableOpacity>
                 </View>
 
-                {/* ══════════════════════════════════════════════════ */}
-                {/* TAB 0: SENSOR MAP                                  */}
-                {/* ══════════════════════════════════════════════════ */}
+                {/* TAB 0: SENSOR MAP */}
                 {activeTab === "map" && (
                     <View style={styles.sensorMapContainer}>
                         {/* Interactive Map Panel */}
@@ -406,12 +589,12 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                             {selectedSensor && (() => {
                                 const sel = liveSensors.find(s => s.id === selectedSensor);
                                 if (!sel) return null;
-                                const status = sel.is_offline ? "offline" : (sel.reading_status || "normal");
-                                const isNormal = status === "normal";
-                                const isOffline = status === "offline";
-
-                                return (
-                                    <View style={styles.sensorInfoOverlay}>
+                                const isLive = sel.is_live;
+                                const isEnabled = sel.enabled !== false;
+                                const isNormal = isLive && isEnabled && (sel.reading_status === "NORMAL" || !sel.reading_status);
+                                    const isOffline = !isLive || !isEnabled;
+                                    return (
+                                        <View style={styles.sensorInfoOverlay}>
                                         <TouchableOpacity style={styles.sensorInfoClose} onPress={() => setSelectedSensor(null)}>
                                             <Feather name="x" size={16} color="#64748b" />
                                         </TouchableOpacity>
@@ -423,12 +606,12 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
                                             <View style={[
                                                 styles.dashboardSensorStatusPill,
-                                                { alignSelf: 'flex-start', backgroundColor: isNormal ? '#DDF6D2' : isOffline ? '#f1f5f9' : '#fee2e2' }
+                                                { alignSelf: 'flex-start', backgroundColor: isNormal ? '#DDF6D2' : !isLive ? '#f1f5f9' : '#fee2e2' }
                                             ]}>
                                                 <Text style={[
                                                     styles.dashboardSensorStatusText,
-                                                    { color: isNormal ? '#166534' : isOffline ? '#64748b' : '#dc2626' }
-                                                ]}>{status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()}</Text>
+                                                    { color: isNormal ? '#166534' : !isLive ? '#64748b' : '#dc2626' }
+                                                ]}>{isLive ? "Live" : "Disconnected"}</Text>
                                             </View>
 
                                             {sel.flood_level !== undefined && (
@@ -441,8 +624,8 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                                     borderColor: isOffline ? '#f1f5f9' : '#dbeafe'
                                                 }}>
                                                     <Text style={{ color: '#64748b', fontSize: 11, fontFamily: 'Poppins_600SemiBold', letterSpacing: 0.5 }}>FLOOD LEVEL</Text>
-                                                    <Text style={{ color: isOffline ? '#94a3b8' : '#1e40af', fontSize: 22, fontFamily: 'Poppins_700Bold', marginTop: 2 }}>
-                                                        {Number(sel.flood_level || 0).toFixed(1)} cm
+                                                    <Text style={{ color: (!isLive || !isEnabled) ? '#94a3b8' : '#1e40af', fontSize: 22, fontFamily: 'Poppins_700Bold', marginTop: 2 }}>
+                                                        {(isLive && isEnabled) ? Number(sel.flood_level || 0).toFixed(1) : "0.0"} cm
                                                     </Text>
                                                 </View>
                                             )}
@@ -481,9 +664,12 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                                     <Text style={styles.sensorListItemBarangay}>
                                                         Brgy. {s.barangay || "—"}
                                                     </Text>
-                                                    {s.is_offline ? (
-                                                        <Text style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>Offline</Text>
+                                                    {s.is_live && s.enabled ? (
+                                                        <Text style={{ fontSize: 10, color: "#16a34a", fontFamily: "Poppins_700Bold" }}>Live</Text>
                                                     ) : (
+                                                        <Text style={{ fontSize: 10, color: "#94a3b8", fontFamily: "Poppins_700Bold" }}>Disconnected</Text>
+                                                    )}
+                                                    {s.is_live && s.enabled && (
                                                         <>
                                                             <Text style={{ fontSize: 12, color: "#3b82f6", marginTop: 2, fontFamily: "Poppins_600SemiBold" }}>
                                                                 Flood: {Number(s.flood_level || 0).toFixed(1)} cm
@@ -494,7 +680,7 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                                         </>
                                                     )}
                                                 </View>
-                                                {s.is_offline ? (
+                                                {!s.is_live ? (
                                                     <View style={[styles.sensorListItemDot, { backgroundColor: dotColor }]} />
                                                 ) : (
                                                     <Animated.View style={[styles.sensorListItemDot, { backgroundColor: dotColor, opacity: blinkAnim }]} />
@@ -513,16 +699,14 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                     contentContainerStyle={[styles.dashboardScrollContent, { paddingHorizontal: 24, paddingTop: 16 }]}
                     showsVerticalScrollIndicator={false}
                 >
-                    {/* ══════════════════════════════════════════════════ */}
-                    {/* TAB 1: REGISTERED SENSORS                         */}
-                    {/* ══════════════════════════════════════════════════ */}
+                    {/* TAB 1: REGISTERED SENSORS */}
                     {activeTab === "sensors" && (
                         <View>
                             {/* Consolidated Health Summary */}
                             <View style={[pg.healthSummaryRow, { marginBottom: 16 }]}>
                                 {[
-                                    { icon: "check-circle", label: "Online", value: onlineSensors, color: "#16a34a", bg: "rgba(22, 163, 74, 0.1)" },
-                                    { icon: "x-circle", label: "Offline", value: offlineSensors, color: "#64748b", bg: "rgba(100, 116, 139, 0.1)" },
+                                    { icon: "check-circle", label: "Live", value: onlineSensors, color: "#16a34a", bg: "rgba(22, 163, 74, 0.1)" },
+                                    { icon: "x-circle", label: "Disconnected", value: offlineSensors, color: "#64748b", bg: "rgba(100, 116, 139, 0.1)" },
                                     { icon: "alert-triangle", label: "Warning", value: warningSensors, color: "#f59e0b", bg: "rgba(245, 158, 11, 0.1)" },
                                     { icon: "alert-octagon", label: "Critical", value: criticalSensors, color: "#ef4444", bg: "rgba(239, 68, 68, 0.1)" },
                                 ].map((card) => (
@@ -558,7 +742,7 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                         </TouchableOpacity>
                                         {showStatusDropdown && (
                                             <View style={pg.dropdown}>
-                                                {["All Status", "Online", "Offline", "Warning", "Critical"].map(s => (
+                                                {["All Status", "Live", "Disconnected", "Warning", "Critical"].map(s => (
                                                     <TouchableOpacity key={s} style={pg.dropdownItem} onPress={() => { setStatusFilter(s); setShowStatusDropdown(false); }}>
                                                         <Text style={pg.dropdownItemText}>{s}</Text>
                                                     </TouchableOpacity>
@@ -595,9 +779,10 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                 <View style={pg.cardGrid}>
                                     {filteredSensors.map(sensor => {
                                         const live = liveSensors.find(ls => ls.id === sensor.id);
-                                        const isOnline = live && !live.is_offline;
-                                        const isWarning = isOnline && (live?.reading_status === "WARNING" || live?.reading_status === "CRITICAL");
-                                        const statusColor = isWarning ? "#ef4444" : isOnline ? "#22c55e" : "#64748b";
+                                        const isLive = live && live.is_live;
+                                        const isEnabled = live && live.enabled !== false;
+                                        const isWarning = isLive && isEnabled && (live?.reading_status === "WARNING" || live?.reading_status === "CRITICAL");
+                                        const statusColor = isWarning ? "#ef4444" : isLive ? "#22c55e" : "#64748b";
 
                                         return (
                                             <TouchableOpacity
@@ -616,12 +801,24 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                                 <View style={pg.cardHead}>
                                                     <View style={{ flex: 1 }}>
                                                         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                                                            {isOnline ? (
-                                                                <Animated.View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: statusColor, opacity: blinkAnim }} />
-                                                            ) : (
-                                                                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: statusColor }} />
-                                                            )}
-                                                            <Text style={pg.sensorName}>{sensor.name}</Text>
+                                                             <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                                                                <Animated.View style={{ 
+                                                                    width: 7, 
+                                                                    height: 7, 
+                                                                    borderRadius: 3.5, 
+                                                                    backgroundColor: statusColor, 
+                                                                    opacity: isLive ? blinkAnim : 1 
+                                                                }} />
+                                                                <Text style={{ 
+                                                                    fontSize: 10, 
+                                                                    color: statusColor, 
+                                                                    fontFamily: "Poppins_700Bold",
+                                                                    letterSpacing: 0.5
+                                                                }}>
+                                                                    {isLive ? "Live" : "Disconnected"}
+                                                                </Text>
+                                                            </View>
+                                                            <Text style={[pg.sensorName, { textAlign: 'center' }]}>{sensor.name}</Text>
                                                         </View>
                                                         <View style={{ flexDirection: "row", alignItems: "center", marginTop: 2, gap: 8 }}>
                                                             <Feather name="map-pin" size={11} color="#94a3b8" />
@@ -630,19 +827,26 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                                         </View>
                                                     </View>
                                                     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                                                        {live?.is_connected && (
+                                                        {isLive && (
                                                             <Switch
-                                                                value={live?.enabled !== false}
+                                                                value={isEnabled}
                                                                 onValueChange={(val) => {
                                                                     handleToggleSensor(sensor, val);
                                                                 }}
                                                                 disabled={togglingId === sensor.id}
                                                                 trackColor={{ false: "#cbd5e1", true: "#86efac" }}
-                                                                thumbColor={live?.enabled !== false ? "#16a34a" : "#94a3b8"}
+                                                                thumbColor={isEnabled ? "#16a34a" : "#94a3b8"}
                                                             />
                                                         )}
                                                         {isSuperAdmin && (
-                                                            <TouchableOpacity style={pg.deleteBtn} onPress={(e) => { e.stopPropagation?.(); handleDeleteSensor(sensor.id); }}>
+                                                            <TouchableOpacity 
+                                                                style={pg.deleteBtn} 
+                                                                onPress={(e) => { 
+                                                                    e.stopPropagation?.(); 
+                                                                    setSensorToDelete(sensor);
+                                                                    setShowDeleteModal(true);
+                                                                }}
+                                                            >
                                                                 <Feather name="trash-2" size={15} color="#dc2626" />
                                                             </TouchableOpacity>
                                                         )}
@@ -651,27 +855,27 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
                                                 <View style={pg.cardDivider} />
 
-                                                {/* Live Data Row — updates via SSE */}
+                                                {/* Live Data Row - updates via SSE */}
                                                 <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 12 }}>
                                                     <View style={{
-                                                        flex: 1, backgroundColor: isOnline ? "#eff6ff" : "#f8fafc",
+                                                        flex: 1, backgroundColor: (isLive && isEnabled) ? "#eff6ff" : "#f8fafc",
                                                         borderRadius: 10, padding: 10, alignItems: "center",
-                                                        borderWidth: 1, borderColor: isOnline ? "#dbeafe" : "#e2e8f0"
+                                                        borderWidth: 1, borderColor: (isLive && isEnabled) ? "#dbeafe" : "#e2e8f0"
                                                     }}>
                                                         <Text style={{ fontSize: 10, color: "#64748b", fontFamily: "Poppins_600SemiBold", letterSpacing: 0.5 }}>FLOOD LEVEL</Text>
-                                                        <Text style={{ fontSize: 22, color: isOnline ? "#1e40af" : "#94a3b8", fontFamily: "Poppins_700Bold", marginTop: 2 }}>
-                                                            {isOnline ? `${Number(live?.flood_level || 0).toFixed(1)}` : "0.0"}
+                                                        <Text style={{ fontSize: 22, color: (isLive && isEnabled) ? "#1e40af" : "#94a3b8", fontFamily: "Poppins_700Bold", marginTop: 2 }}>
+                                                            {(isLive && isEnabled) ? `${Number(live?.flood_level || 0).toFixed(1)}` : "0.0"}
                                                         </Text>
                                                         <Text style={{ fontSize: 10, color: "#94a3b8" }}>cm</Text>
                                                     </View>
                                                     <View style={{
-                                                        flex: 1, backgroundColor: isOnline ? "#f0f9ff" : "#f8fafc",
+                                                        flex: 1, backgroundColor: (isLive && isEnabled) ? "#f0f9ff" : "#f8fafc",
                                                         borderRadius: 10, padding: 10, alignItems: "center",
-                                                        borderWidth: 1, borderColor: isOnline ? "#bae6fd" : "#e2e8f0"
+                                                        borderWidth: 1, borderColor: (isLive && isEnabled) ? "#bae6fd" : "#e2e8f0"
                                                     }}>
                                                         <Text style={{ fontSize: 10, color: "#64748b", fontFamily: "Poppins_600SemiBold", letterSpacing: 0.5 }}>RAW DISTANCE</Text>
-                                                        <Text style={{ fontSize: 22, color: isOnline ? "#0284c7" : "#94a3b8", fontFamily: "Poppins_700Bold", marginTop: 2 }}>
-                                                            {isOnline ? `${Number(live?.raw_distance || 0).toFixed(1)}` : "0.0"}
+                                                        <Text style={{ fontSize: 22, color: (isLive && isEnabled) ? "#0284c7" : "#94a3b8", fontFamily: "Poppins_700Bold", marginTop: 2 }}>
+                                                            {(isLive && isEnabled) ? `${Number(live?.raw_distance || 0).toFixed(1)}` : "0.0"}
                                                         </Text>
                                                         <Text style={{ fontSize: 10, color: "#94a3b8" }}>cm</Text>
                                                     </View>
@@ -702,7 +906,7 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 </ScrollView>
             </View>
 
-            {/* ── Registration Modal ─────────────────────────────────────── */}
+            {/* Registration Modal */}
             <Modal visible={showRegistrationModal} transparent animationType="fade">
                 <View style={pg.modalOverlay}>
                     <View style={pg.modalBox}>
@@ -753,8 +957,6 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                         keyboardType="numeric" value={formData.lng} onChangeText={v => handleInputChange("lng", v)} />
                                 </View>
                             </View>
-
-
                         </ScrollView>
 
                         <View style={pg.modalFooter}>
@@ -774,20 +976,25 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 </View>
             </Modal>
 
-            {/* ── Status Details Modal ─────────────────────────────────────────── */}
+            {/* Status Details Modal */}
             <Modal visible={showStatusModal} transparent animationType="slide">
                 <View style={pg.modalOverlay}>
                     <View style={[pg.modalBox, { maxWidth: 500 }]}>
                         {selectedSensorHealth && (() => {
                             const sh = selectedSensorHealth;
-                            const isOff = sh.live?.is_offline;
-                            const reading_st = isOff ? "OFFLINE" : (sh.live?.reading_status || "NORMAL");
+                            const isLive = sh.live?.is_live;
+                            const isEnabled = sh.live?.enabled !== false;
+                            const isDisconnected = !isLive;
+                            const isSoftwareOff = !isEnabled;
+                            const isSuppressed = isDisconnected || isSoftwareOff;
+                            
+                            const reading_st = isDisconnected ? "Disconnected" : (isSoftwareOff ? "OFF" : (sh.live?.reading_status || "NORMAL"));
                             const st = getStatusBadge(reading_st);
                             const lastSeen = sh.live?.last_seen ? formatPST(sh.live.last_seen) : "Unknown";
 
                             return (
                                 <>
-                                    <LinearGradient colors={isOff ? ["#475569", "#1e293b"] : ["#001D39", "#0A4174"]} style={pg.modalHeader}>
+                                    <LinearGradient colors={isDisconnected ? ["#475569", "#1e293b"] : (isSoftwareOff ? ["#64748b", "#475569"] : ["#001D39", "#0A4174"])} style={pg.modalHeader}>
                                         <View>
                                             <Text style={pg.modalTitle}>{sh.name}</Text>
                                             <Text style={{ fontSize: 13, color: "#94a3b8", fontFamily: "Poppins_400Regular" }}>{sh.id} • Brgy. {sh.barangay}</Text>
@@ -798,31 +1005,29 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                     </LinearGradient>
 
                                     <View style={pg.modalBody}>
-
-
-                                        {/* Flood Level + Raw Distance — live via SSE */}
+                                        {/* Flood Level + Raw Distance - live via SSE */}
                                         <View style={{ flexDirection: "row", gap: 12, marginBottom: 16 }}>
-                                            <View style={{ flex: 1, backgroundColor: isOff ? "#f1f5f9" : "#eff6ff", borderRadius: 16, padding: 16, alignItems: "center", borderWidth: 1, borderColor: isOff ? "#cbd5e1" : "#dbeafe" }}>
-                                                <Feather name="trending-up" size={16} color={isOff ? "#94a3b8" : "#3b82f6"} />
-                                                <Text style={{ fontSize: 11, color: isOff ? "#94a3b8" : "#3b82f6", fontFamily: "Poppins_700Bold", letterSpacing: 0.5, marginTop: 4 }}>FLOOD LEVEL</Text>
-                                                <Text style={{ fontSize: 36, color: isOff ? "#94a3b8" : "#1e40af", fontFamily: "Poppins_800ExtraBold", marginVertical: 2 }}>
-                                                    {isOff ? "—" : Number(sh.live?.flood_level ?? 0).toFixed(1)}
+                                            <View style={{ flex: 1, backgroundColor: isSuppressed ? "#f1f5f9" : "#eff6ff", borderRadius: 16, padding: 16, alignItems: "center", borderWidth: 1, borderColor: isSuppressed ? "#cbd5e1" : "#dbeafe" }}>
+                                                <Feather name="trending-up" size={16} color={isSuppressed ? "#94a3b8" : "#3b82f6"} />
+                                                <Text style={{ fontSize: 11, color: isSuppressed ? "#94a3b8" : "#3b82f6", fontFamily: "Poppins_700Bold", letterSpacing: 0.5, marginTop: 4 }}>FLOOD LEVEL</Text>
+                                                <Text style={{ fontSize: 36, color: isSuppressed ? "#94a3b8" : "#1e40af", fontFamily: "Poppins_800ExtraBold", marginVertical: 2 }}>
+                                                    {isSuppressed ? "0.0" : Number(sh.live?.flood_level ?? 0).toFixed(1)}
                                                 </Text>
                                                 <Text style={{ fontSize: 11, color: "#94a3b8" }}>cm depth</Text>
                                             </View>
-                                            <View style={{ flex: 1, backgroundColor: isOff ? "#f1f5f9" : "#f0f9ff", borderRadius: 16, padding: 16, alignItems: "center", borderWidth: 1, borderColor: isOff ? "#cbd5e1" : "#bae6fd" }}>
-                                                <Feather name="radio" size={16} color={isOff ? "#94a3b8" : "#0284c7"} />
-                                                <Text style={{ fontSize: 11, color: isOff ? "#94a3b8" : "#0284c7", fontFamily: "Poppins_700Bold", letterSpacing: 0.5, marginTop: 4 }}>RAW DISTANCE</Text>
-                                                <Text style={{ fontSize: 36, color: isOff ? "#94a3b8" : "#0284c7", fontFamily: "Poppins_800ExtraBold", marginVertical: 2 }}>
-                                                    {isOff ? "—" : Number(sh.live?.raw_distance ?? 0).toFixed(1)}
+                                            <View style={{ flex: 1, backgroundColor: isSuppressed ? "#f1f5f9" : "#f0f9ff", borderRadius: 16, padding: 16, alignItems: "center", borderWidth: 1, borderColor: isSuppressed ? "#cbd5e1" : "#bae6fd" }}>
+                                                <Feather name="radio" size={16} color={isSuppressed ? "#94a3b8" : "#0284c7"} />
+                                                <Text style={{ fontSize: 11, color: isSuppressed ? "#94a3b8" : "#0284c7", fontFamily: "Poppins_700Bold", letterSpacing: 0.5, marginTop: 4 }}>RAW DISTANCE</Text>
+                                                <Text style={{ fontSize: 36, color: isSuppressed ? "#94a3b8" : "#0284c7", fontFamily: "Poppins_800ExtraBold", marginVertical: 2 }}>
+                                                    {isSuppressed ? "0.0" : Number(sh.live?.raw_distance ?? 0).toFixed(1)}
                                                 </Text>
                                                 <Text style={{ fontSize: 11, color: "#94a3b8" }}>cm to ground</Text>
                                             </View>
                                         </View>
 
-                                        {/* Alert level badge */}
-                                        <View style={{ alignItems: "center", marginBottom: 16 }}>
-                                            <View style={{ backgroundColor: st.bg, paddingHorizontal: 20, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: st.border }}>
+                                         {/* Alert level badge */}
+                                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingHorizontal: 4 }}>
+                                            <View style={{ backgroundColor: st.bg, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: st.border }}>
                                                 <Text style={{ fontSize: 13, fontFamily: "Poppins_700Bold", color: st.text }}>{reading_st}</Text>
                                             </View>
                                         </View>
@@ -836,7 +1041,6 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                                 <Text style={{ fontSize: 13, color: "#64748b", fontFamily: "Poppins_400Regular" }}>Coordinates</Text>
                                                 <Text style={{ fontSize: 13, color: "#0f172a", fontFamily: "Poppins_600SemiBold" }}>{sh.lat?.toFixed(6)}, {sh.lng?.toFixed(6)}</Text>
                                             </View>
-
 
                                             {sh.description && (
                                                 <View style={{ gap: 4 }}>
@@ -863,11 +1067,69 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 </View>
             </Modal>
 
+            {/* Delete Confirmation Modal */}
+            <Modal visible={showDeleteModal} transparent animationType="fade">
+                <View style={pg.modalOverlay}>
+                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#fee2e2", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                            <Feather name="trash-2" size={32} color="#dc2626" />
+                        </View>
+                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8, textAlign: "center" }}>Delete Sensor?</Text>
+                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>
+                            Are you sure you want to delete <Text style={{ fontFamily: "Poppins_600SemiBold", color: "#0f172a" }}>{sensorToDelete?.name}</Text>? This action cannot be undone.
+                        </Text>
+                        <View style={{ flexDirection: "row", gap: 12, width: "100%" }}>
+                            <TouchableOpacity style={[pg.cancelBtn, { flex: 1 }]} onPress={cancelDelete}>
+                                <Text style={pg.cancelBtnText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={[pg.submitBtn, { flex: 1, backgroundColor: "#dc2626" }]} 
+                                onPress={confirmDelete}
+                                disabled={loading}
+                            >
+                                {loading ? <ActivityIndicator size="small" color="#fff" /> : (
+                                    <Text style={pg.submitBtnText}>Delete</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal visible={showSuccessModal} transparent animationType="fade">
+                <View style={pg.modalOverlay}>
+                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#dcfce7", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                            <Feather name="check-circle" size={32} color="#16a34a" />
+                        </View>
+                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8, textAlign: "center" }}>Success!</Text>
+                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>{successMessage}</Text>
+                        <TouchableOpacity style={pg.submitBtn} onPress={() => setShowSuccessModal(false)}>
+                            <Text style={pg.submitBtnText}>Done</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+            {/* Error Modal */}
+            <Modal visible={showErrorModal} transparent animationType="fade">
+                <View style={pg.modalOverlay}>
+                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#fee2e2", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                            <Feather name="alert-circle" size={32} color="#dc2626" />
+                        </View>
+                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8 }}>Error</Text>
+                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>{errorMessage}</Text>
+                        <TouchableOpacity style={[pg.submitBtn, { backgroundColor: "#dc2626" }]} onPress={() => setShowErrorModal(false)}>
+                            <Text style={pg.submitBtnText}>Close</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 };
 
-// ── Page-level styles (matching the existing system design) ────────────────
+// Page-level styles (matching the existing system design)
 const pg = StyleSheet.create({
     // Tabs
     tabBar: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: "#e2e8f0", backgroundColor: "#fff", paddingHorizontal: 24 },
@@ -883,7 +1145,7 @@ const pg = StyleSheet.create({
     searchInput: { flex: 1, fontSize: 14, fontFamily: "Poppins_400Regular", color: "#0f172a", outlineStyle: "none" },
     filterBtn: { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: "#e2e8f0", paddingHorizontal: 12, paddingVertical: 8 },
     filterBtnText: { fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b" },
-    dropdown: { position: "absolute", top: 48, right: 0, backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: "#e2e8f0", zIndex: 9999, shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 8, elevation: 10, minWidth: 160 },
+    dropdown: { position: "absolute", top: 48, right: 0, backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: "#e2e8f0", zIndex: 9999, boxShadow: "0px 4px 12px rgba(0, 0, 0, 0.1)", elevation: 10, minWidth: 160 },
     dropdownItem: { paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#f1f5f9" },
     dropdownItemText: { fontSize: 14, fontFamily: "Poppins_400Regular", color: "#0f172a" },
     registerBtn: { flexDirection: "row", alignItems: "center", backgroundColor: "#3b82f6", borderRadius: 16, paddingHorizontal: 16, paddingVertical: 8 },
@@ -897,10 +1159,7 @@ const pg = StyleSheet.create({
         borderWidth: 1,
         borderColor: "#e2e8f0",
         overflow: "hidden",
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.06,
-        shadowRadius: 12,
+        boxShadow: "0px 4px 12px rgba(0, 0, 0, 0.06)",
         elevation: 4
     },
     cardAccent: { height: 3, width: "100%" },
@@ -920,7 +1179,7 @@ const pg = StyleSheet.create({
     // Shared badge
     badge: { borderRadius: 16, borderWidth: 1, paddingVertical: 4, paddingHorizontal: 8, alignSelf: "flex-start" },
     badgeText: { fontSize: 11, fontFamily: "Poppins_600SemiBold" },
-    deleteBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#e2e8f0", alignItems: "center", justifyContent: "center" },
+    deleteBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: "#fee2e2", alignItems: "center", justifyContent: "center" },
     // Empty state
     emptyState: { alignItems: "center", paddingVertical: 64 },
     emptyIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: "#f1f5f9", alignItems: "center", justifyContent: "center", marginBottom: 16 },
@@ -938,10 +1197,7 @@ const pg = StyleSheet.create({
         alignItems: "center",
         borderWidth: 1,
         borderColor: "#e2e8f0",
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.06,
-        shadowRadius: 12,
+        boxShadow: "0px 4px 12px rgba(0, 0, 0, 0.06)",
         elevation: 4
     },
     healthCardIcon: { width: 44, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center", marginBottom: 12 },
@@ -953,10 +1209,7 @@ const pg = StyleSheet.create({
         borderWidth: 1,
         borderColor: "#e2e8f0",
         overflow: "hidden",
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.06,
-        shadowRadius: 12,
+        boxShadow: "0px 4px 12px rgba(0, 0, 0, 0.06)",
         elevation: 4
     },
     panelHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16, borderBottomWidth: 1, borderBottomColor: "#f1f5f9" },
@@ -972,7 +1225,7 @@ const pg = StyleSheet.create({
     tableCellSub: { fontSize: 11, fontFamily: "Poppins_400Regular", color: "#94a3b8" },
     // Modal
     modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center", padding: 16 },
-    modalBox: { backgroundColor: "#fff", borderRadius: 16, overflow: "hidden", width: "100%", maxWidth: 680, maxHeight: "90%", shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 24, elevation: 10 },
+    modalBox: { backgroundColor: "#fff", borderRadius: 16, overflow: "hidden", width: "100%", maxWidth: 680, maxHeight: "90%", boxShadow: "0px 8px 24px rgba(0, 0, 0, 0.2)", elevation: 10 },
     modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 24 },
     modalTitle: { fontSize: 18, fontFamily: "Poppins_700Bold", color: "#fff" },
     modalBody: { padding: 24 },

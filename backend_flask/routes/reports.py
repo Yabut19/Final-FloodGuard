@@ -17,7 +17,7 @@ def allowed_file(filename):
 def _emit_report_update():
     """Broadcast report changes to all WebSocket clients."""
     try:
-        from app import socketio
+        from socket_instance import socketio
         socketio.emit("report_update", {"message": "refresh"}, namespace="/")
     except Exception:
         pass
@@ -339,7 +339,7 @@ def verify_report(report_id):
 
     # ── REAL-TIME BROADCAST: Instant escalation to all mobile apps ──
     try:
-        from app import socketio
+        from socket_instance import socketio
         socketio.emit("new_notification", {
             "type": "verified_report",
             "id": report_id,

@@ -7,6 +7,7 @@ import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
 import { API_BASE_URL } from "../config/api";
 import { getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
+import { authFetch } from "../utils/helpers";
 import useDataSync from "../utils/useDataSync";
 
 const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) => {
@@ -24,7 +25,7 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
     useEffect(() => {
         const fetchSystemStatus = async () => {
             try {
-                const res = await fetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
+                const res = await authFetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
                 if (res.ok) {
                     const data = await res.json();
                     const online = data.filter(s => !s.is_offline).length;
@@ -59,7 +60,7 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
     const fetchThresholds = async () => {
         setIsLoading(true);
         try {
-            const res = await fetch(`${API_BASE_URL}/api/config/thresholds`);
+            const res = await authFetch(`${API_BASE_URL}/api/config/thresholds`);
             if (res.ok) {
                 const data = await res.json();
                 setAdvisoryLevel(String(data.advisory_level));
@@ -95,7 +96,7 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
 
         setIsSaving(true);
         try {
-            const res = await fetch(`${API_BASE_URL}/api/config/thresholds`, {
+            const res = await authFetch(`${API_BASE_URL}/api/config/thresholds`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({

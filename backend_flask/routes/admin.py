@@ -9,8 +9,8 @@ admin_bp = Blueprint('admin', __name__)
 def _emit_user_update():
     """Broadcast user list change to all WebSocket clients."""
     try:
-        from app import socketio
-        socketio.emit("user_update", {"message": "refresh"})
+        from socket_instance import socketio
+        socketio.emit("user_update", {"message": "refresh"}, namespace="/")
     except Exception:
         pass
 
@@ -171,6 +171,12 @@ def delete_user(current_user, user_id):
         elif user_id.startswith('a-'):
             table = 'admins'
             db_id = user_id[2:]
+            
+            # Prevent deletion of Super Admin accounts
+            cursor.execute("SELECT role FROM admins WHERE id = %s", (db_id,))
+            a_user = cursor.fetchone()
+            if a_user and a_user[0] == 'super_admin':
+                return jsonify({"error": "Super Admin accounts cannot be deleted for security reasons"}), 403
         else:
             return jsonify({"error": "Invalid user ID format"}), 400
 
@@ -178,6 +184,34 @@ def delete_user(current_user, user_id):
         db.commit()
         _emit_user_update()
         return jsonify({"message": "User deleted successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cursor.close()
+
+@admin_bp.route('/locations', methods=['GET'])
+@lgu_or_admin_required
+def get_locations(current_user):
+    """Fetch all unique locations from sensors and combine with default sitios."""
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        # Get unique barangays from registered sensors
+        cursor.execute("SELECT DISTINCT barangay FROM sensors WHERE barangay IS NOT NULL AND barangay != ''")
+        sensor_locations = [row[0] for row in cursor.fetchall()]
+        
+        # Standard default sitios for Mabolo
+        default_sitios = [
+            "Almendras", "Banilad (Mabolo)", "Cabantan", "Casals Village",
+            "Castle Peak", "Holy Name", "M.J. Cuenco", "Panagdait",
+            "San Isidro", "San Roque", "San Vicente", "Santo Niño",
+            "Sindulan", "Soriano", "Tres Borces"
+        ]
+        
+        # Combine, unique, and sort
+        all_locations = sorted(list(set(sensor_locations + default_sitios)))
+        
+        return jsonify(all_locations), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:

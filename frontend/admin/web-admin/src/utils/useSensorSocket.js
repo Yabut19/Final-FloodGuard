@@ -21,7 +21,7 @@ export default function useSensorSocket(onUpdate, onThresholdUpdate) {
 
     // DIRECT CONNECTION AS REQUESTED
     const socket = io(API_BASE_URL, {
-      transports: ["websocket", "polling"],
+      transports: ["polling"],
     });
 
     socket.on("connect", () => {

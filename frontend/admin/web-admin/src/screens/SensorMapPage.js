@@ -7,6 +7,7 @@ import RealTimeClock from "../components/RealTimeClock";
 import { formatPST } from "../utils/dateUtils";
 import { MABOLO_REGION } from "../config/constants";
 import { API_BASE_URL } from "../config/api";
+import { authFetch } from "../utils/helpers";
 import useDataSync from "../utils/useDataSync";
 
 const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
@@ -14,17 +15,20 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const [sensorData, setSensorData] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    // API base URL
-    const API_BASE = API_BASE_URL;
 
     // Fetch sensor data from backend
     const fetchSensorData = async () => {
         try {
-            const response = await fetch(`${API_BASE}/api/iot/sensors/status-all`);
+            const response = await authFetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
             if (!response.ok) {
+                console.error("[SensorMap] Failed to fetch sensors:", response.status);
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
+            if (!Array.isArray(data)) {
+                console.error("[SensorMap] Data is not an array:", data);
+                return;
+            }
 
             // Transform the data to match our expected format
             const transformedData = data.map(s => ({
@@ -33,13 +37,16 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 barangay: s.barangay || "Active Area",
                 latitude: s.lat || MABOLO_REGION.latitude,
                 longitude: s.lng || MABOLO_REGION.longitude,
-                status: s.is_offline ? "offline" : (s.reading_status?.toLowerCase() || "normal"),
-                risk_level: (s.reading_status || "").toLowerCase() === "normal" ? "low" :
+                is_live: s.is_live,
+                enabled: s.enabled,
+                status: s.is_live ? (s.enabled ? (s.reading_status?.toLowerCase() || "normal") : "off") : "disconnected",
+                risk_level: (!s.is_live || !s.enabled) ? "none" : 
+                    (s.reading_status || "").toLowerCase() === "normal" ? "low" :
                     (s.reading_status || "").toLowerCase() === "warning" ? "elevated" : "high",
                 flood_level: Number(s.flood_level || 0),
                 raw_distance: Number(s.raw_distance || 0),
                 last_updated: s.last_seen ? formatPST(s.last_seen) : "No data",
-                is_offline: s.is_offline
+                is_offline: !s.is_live
             }));
 
             setSensorData(transformedData);
@@ -62,13 +69,17 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
         onSensorUpdate: (reading) => {
             setSensorData(prev => prev.map(s => {
                 if (s.sensor_id !== reading.sensor_id) return s;
-                const isOffline = reading.is_offline || false;
+                const isLive = reading.is_live ?? true;
+                const isEnabled = reading.enabled ?? true;
+                const status = isLive ? (isEnabled ? (reading.status?.toLowerCase() || "normal") : "off") : "disconnected";
                 return {
                     ...s,
                     flood_level:  Number(reading.flood_level || 0),
                     raw_distance: Number(reading.raw_distance || 0),
-                    status:       isOffline ? "offline" : (reading.status?.toLowerCase() || "normal"),
-                    is_offline:   isOffline,
+                    status:       status,
+                    is_live:      isLive,
+                    enabled:      isEnabled,
+                    is_offline:   !isLive,
                     last_updated: formatPST(new Date()),
                 };
             }));
@@ -84,8 +95,8 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     useEffect(() => {
         const animation = Animated.loop(
             Animated.sequence([
-                Animated.timing(blinkAnim, { toValue: 0.2, duration: 1000, useNativeDriver: true }),
-                Animated.timing(blinkAnim, { toValue: 1, duration: 1000, useNativeDriver: true })
+                Animated.timing(blinkAnim, { toValue: 0.2, duration: 1000, useNativeDriver: Platform.OS !== 'web' }),
+                Animated.timing(blinkAnim, { toValue: 1, duration: 1000, useNativeDriver: Platform.OS !== 'web' })
             ])
         );
         animation.start();
@@ -256,12 +267,14 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 case "normal":
                     return "#16a34a";
                 case "warning":
-                    return "#f97316"; // Orange
+                    return "#f97316";
                 case "alarm":
                 case "critical":
-                    return "#dc2626"; // Red
-                case "error":
+                    return "#dc2626";
+                case "off":
                     return "#64748b";
+                case "disconnected":
+                    return "#94a3b8";
                 default:
                     return "#64748b";
             }
@@ -289,12 +302,12 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
                 const popupContent = `
                     <div style="font-family: sans-serif; padding: 4px;">
-                        <b style="font-size: 14px;">Sensor ${sensor.sensor_id}</b><br>
-                        <span style="color: #64748b; font-size: 12px;">Barangay Mabolo</span><hr style="border:0; border-top:1px solid #eee; margin: 8px 0;">
-                        <div style="margin-bottom: 4px;">Status: <span style="font-weight: 600; color: ${color};">${sensor.status.charAt(0).toUpperCase() + sensor.status.slice(1).toLowerCase()}</span></div>
-                        <div style="margin-bottom: 4px;">Flood Level: <b>${sensor.flood_level}cm</b></div>
+                        <b style="font-size: 14px;">Sensor ${sensor.name}</b><br>
+                        <span style="color: #64748b; font-size: 12px;">Brgy. ${sensor.barangay}</span><hr style="border:0; border-top:1px solid #eee; margin: 8px 0;">
+                        <div style="margin-bottom: 4px;">Status: <span style="font-weight: 600; color: ${color};">${sensor.status.toUpperCase()}</span></div>
+                        <div style="margin-bottom: 4px;">Flood Level: <b>${(sensor.is_live && sensor.enabled) ? sensor.flood_level.toFixed(1) : "0.0"} cm</b></div>
                         <div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">Last Updated: ${sensor.last_updated}</div>
-                        ${sensor.is_offline ? '<span style="color: #64748b;">🔘 Offline</span>' : '<span>● Online</span>'}
+                        ${sensor.is_live ? '<span style="color: #16a34a;">● Live</span>' : '<span style="color: #94a3b8;">🔘 Disconnected</span>'}
                     </div>
                 `;
 
@@ -362,7 +375,7 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
         return (
             <View style={styles.dashboardRoot}>
                 {/* Sidebar */}
-                <AdminSidebar variant={userRole} activePage="sensor-registration" onNavigate={onNavigate} onLogout={onLogout} />
+                <AdminSidebar variant={userRole} activePage="sensor-map" onNavigate={onNavigate} onLogout={onLogout} />
 
                 {/* Main content */}
                 <View style={styles.dashboardMain}>
@@ -375,10 +388,10 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                             </Text>
                         </View>
                         <View style={styles.dashboardTopRight}>
-                            <View style={[styles.dashboardStatusPill, { backgroundColor: sensorData.filter(s => !s.is_offline).length >= 1 ? "rgba(22, 163, 74, 0.1)" : "rgba(100, 116, 139, 0.1)" }]}>
-                                <View style={[styles.dashboardStatusDot, { backgroundColor: sensorData.filter(s => !s.is_offline).length >= 1 ? "#16a34a" : "#64748b" }]} />
-                                <Text style={[styles.dashboardStatusText, { color: sensorData.filter(s => !s.is_offline).length >= 1 ? "#16a34a" : "#64748b" }]}>
-                                    {sensorData.filter(s => !s.is_offline).length >= 1 ? "Online" : "Offline"}
+                            <View style={[styles.dashboardStatusPill, { backgroundColor: sensorData.filter(s => s.is_live).length >= 1 ? "rgba(22, 163, 74, 0.1)" : "rgba(100, 116, 139, 0.1)" }]}>
+                                <View style={[styles.dashboardStatusDot, { backgroundColor: sensorData.filter(s => s.is_live).length >= 1 ? "#16a34a" : "#64748b" }]} />
+                                <Text style={[styles.dashboardStatusText, { color: sensorData.filter(s => s.is_live).length >= 1 ? "#16a34a" : "#64748b" }]}>
+                                    {sensorData.filter(s => s.is_live).length >= 1 ? "Live" : "Disconnected"}
                                 </Text>
                             </View>
                             <RealTimeClock style={styles.dashboardTopDate} />
@@ -455,23 +468,27 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                                 ]}
                                             />
                                             <Text style={styles.sensorInfoStatusText}>
-                                                {sensors
-                                                    .find((s) => s.sensor_id === selectedSensor)
-                                                    ?.status.toUpperCase()}
+                                                {sensors.find((s) => s.sensor_id === selectedSensor)?.is_live ? "Live" : "Disconnected"}
                                             </Text>
                                         </View>
 
                                         {/* Flood Level */}
-                                        {sensors.find((s) => s.sensor_id === selectedSensor)?.flood_level !== undefined && (
+                                        {sensors.find((s) => s.sensor_id === selectedSensor) && (
                                             <View style={{ backgroundColor: '#f1f5f9', padding: 8, borderRadius: 8 }}>
                                                 <Text style={{ color: '#64748b', fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
                                                     Flood Level
                                                 </Text>
                                                 <Text style={{ color: '#0f172a', fontSize: 18, fontFamily: "Poppins_700Bold", marginTop: 4 }}>
-                                                    {sensors.find((s) => s.sensor_id === selectedSensor)?.flood_level} cm
+                                                    {(sensors.find((s) => s.sensor_id === selectedSensor).is_live && sensors.find((s) => s.sensor_id === selectedSensor).enabled)
+                                                        ? `${sensors.find((s) => s.sensor_id === selectedSensor).flood_level.toFixed(1)} cm`
+                                                        : "0.0 cm"
+                                                    }
                                                 </Text>
                                                 <Text style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>
-                                                    Raw Distance: {sensors.find((s) => s.sensor_id === selectedSensor)?.raw_distance} cm
+                                                    Raw Distance: {(sensors.find((s) => s.sensor_id === selectedSensor).is_live && sensors.find((s) => s.sensor_id === selectedSensor).enabled)
+                                                        ? `${sensors.find((s) => s.sensor_id === selectedSensor).raw_distance.toFixed(1)} cm`
+                                                        : "0.0 cm"
+                                                    }
                                                 </Text>
                                             </View>
                                         )}
@@ -514,14 +531,13 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                         </View>
 
                                         {/* Status */}
-                                        {sensors.find((s) => s.sensor_id === selectedSensor)?.is_offline && (
-                                            <Text style={[styles.sensorInfoTime, { color: '#dc2626', fontFamily: "Poppins_600SemiBold" }]}>
-                                                ⚠️ Sensor is OFFLINE
-                                            </Text>
-                                        )}
-                                        {!sensors.find((s) => s.sensor_id === selectedSensor)?.is_offline && (
+                                        {sensors.find((s) => s.sensor_id === selectedSensor)?.is_live ? (
                                             <Text style={[styles.sensorInfoTime, { color: '#16a34a', fontFamily: "Poppins_600SemiBold" }]}>
-                                                ✓ Sensor is ONLINE
+                                                ✓ Sensor is Live
+                                            </Text>
+                                        ) : (
+                                            <Text style={[styles.sensorInfoTime, { color: '#94a3b8', fontFamily: "Poppins_600SemiBold" }]}>
+                                                🔘 Sensor is Disconnected
                                             </Text>
                                         )}
                                     </View>
@@ -550,7 +566,13 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                                     styles.sensorListItem,
                                                     selectedSensor === sensor.sensor_id && styles.sensorListItemSelected,
                                                 ]}
-                                                onPress={() => setSelectedSensor(sensor.sensor_id)}
+                                                onPress={() => {
+                                                    setSelectedSensor(sensor.sensor_id);
+                                                    const map = window.sensorMapInstance;
+                                                    if (map && sensor.latitude && sensor.longitude) {
+                                                        map.setView([sensor.latitude, sensor.longitude], 17);
+                                                    }
+                                                }}
                                             >
                                                 <View style={styles.sensorListItemContent}>
                                                     <Text style={styles.sensorListItemName}>
@@ -560,13 +582,13 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                                         {sensor.barangay}
                                                     </Text>
                                                     <Text style={styles.sensorListItemStatus}>
-                                                        Flood: {sensor.flood_level}cm • {sensor.is_offline ? "Offline" : sensor.status.charAt(0).toUpperCase() + sensor.status.slice(1).toLowerCase()}
+                                                        Flood: {(sensor.is_live && sensor.enabled) ? sensor.flood_level.toFixed(1) : "0.0"} cm • {sensor.is_live ? "Live" : "Disconnected"}
                                                     </Text>
                                                 </View>
-                                                {sensor.is_offline ? (
-                                                    <View style={[styles.sensorListItemDot, { backgroundColor: getStatusDotColor(sensor.status, sensor.is_offline) }]} />
+                                                {!sensor.is_live ? (
+                                                    <View style={[styles.sensorListItemDot, { backgroundColor: getStatusDotColor(sensor.status) }]} />
                                                 ) : (
-                                                    <Animated.View style={[styles.sensorListItemDot, { backgroundColor: getStatusDotColor(sensor.status, sensor.is_offline), opacity: blinkAnim }]} />
+                                                    <Animated.View style={[styles.sensorListItemDot, { backgroundColor: getStatusDotColor(sensor.status), opacity: blinkAnim }]} />
                                                 )}
                                             </TouchableOpacity>
                                         ))

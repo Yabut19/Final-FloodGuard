@@ -6,6 +6,7 @@ import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
 import { API_BASE_URL } from "../config/api";
 import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
+import { authFetch } from "../utils/helpers";
 import useDataSync from "../utils/useDataSync";
 import dialogs from "../utils/dialogs";
 
@@ -160,7 +161,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const handleEscalate = async (alertId) => {
         setEscalatingId(alertId);
         try {
-            const response = await fetch(`${API_BASE_URL}/api/subscriptions/escalate/${alertId}`, {
+            const response = await authFetch(`${API_BASE_URL}/api/subscriptions/escalate/${alertId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ escalated_by: 'admin' })
@@ -192,7 +193,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             setDeletingId(alertId);
             try {
                 const deleteUrl = `${API_BASE_URL}/api/alerts/${alertId}`;
-                const response = await fetch(deleteUrl, {
+                const response = await authFetch(deleteUrl, {
                     method: 'DELETE',
                     headers: { 'Content-Type': 'application/json' }
                 });
@@ -215,7 +216,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
     const fetchPendingReports = async () => {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/reports?status=pending`);
+            const response = await authFetch(`${API_BASE_URL}/api/reports/?status=pending`);
             const data = await response.json();
             setVerifications(data);
             setLoadingVerifications(false);
@@ -227,7 +228,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
     const fetchAllReports = async () => {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/reports`);
+            const response = await authFetch(`${API_BASE_URL}/api/reports/`);
             const data = await response.json();
             setAllReports(data);
             setLoadingAllReports(false);
@@ -239,7 +240,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
     const fetchAlertHistory = async () => {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/alerts/`);
+            const response = await authFetch(`${API_BASE_URL}/api/alerts/`);
             const data = await response.json();
             setAlertHistory(data);
             setLoadingAlertHistory(false);
@@ -252,7 +253,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const fetchSensorDataForBarangay = async (barangay) => {
         try {
             setLoadingSensorData(true);
-            const response = await fetch(`${API_BASE_URL}/api/iot/sensor-by-location?location=${encodeURIComponent(barangay)}`);
+            const response = await authFetch(`${API_BASE_URL}/api/iot/sensor-by-location?location=${encodeURIComponent(barangay)}`);
             if (!response.ok) {
                 console.warn("Sensor data not found for location:", barangay);
                 setSensorDataForReport(null);
@@ -270,7 +271,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
     const fetchSystemStatus = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
+            const res = await authFetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
             if (res.ok) {
                 const data = await res.json();
                 const online = data.filter(s => !s.is_offline).length;
@@ -340,7 +341,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
         try {
             const barangayString = selectedBarangays.includes("All Barangays") ? "All" : selectedBarangays.join(", ");
 
-            const response = await fetch(`${API_BASE_URL}/api/alerts/`, {
+            const response = await authFetch(`${API_BASE_URL}/api/alerts/`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -361,6 +362,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 setAlertTitle("");
                 setSelectedBarangays([]);
                 fetchAlertHistory(); // Refresh history list
+                fetchActiveAlerts(); // Refresh Mission Control active alerts
             } else {
                 dialogs.error("Failed", "Failed to broadcast alert.");
             }
@@ -393,7 +395,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
         
         try {
             // Update report status to verified
-            const response = await fetch(`${API_BASE_URL}/api/reports/${id}/verify`, {
+            const response = await authFetch(`${API_BASE_URL}/api/reports/${id}/verify`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -429,7 +431,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const handleReject = async (id, report) => {
         try {
             // Update report status to dismissed
-            await fetch(`${API_BASE_URL}/api/reports/${id}/reject`, {
+            await authFetch(`${API_BASE_URL}/api/reports/${id}/reject`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ 

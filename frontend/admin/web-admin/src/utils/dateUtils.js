@@ -47,7 +47,7 @@ export const formatPST = (date) => {
  * Connected devices = 0 -> Offline
  */
 export const getSystemStatus = (onlineCount) => {
-    return onlineCount >= 1 ? "Online" : "Offline";
+    return onlineCount >= 1 ? "Live" : "Disconnected";
 };
 
 export const getSystemStatusColor = (onlineCount) => {

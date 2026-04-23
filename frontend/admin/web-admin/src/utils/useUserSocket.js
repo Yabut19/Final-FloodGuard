@@ -27,7 +27,7 @@ export default function useUserSocket(onUpdate) {
         .then(({ io }) => {
           if (destroyed) return;
           socket = io(WS_URL, {
-            transports: ["websocket", "polling"],
+            transports: ["polling"],
           });
 
           socketRef.current = socket;

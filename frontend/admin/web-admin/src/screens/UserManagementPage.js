@@ -58,7 +58,7 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
     useEffect(() => {
         const fetchSystemStatus = async () => {
             try {
-                const res = await fetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
+                const res = await authFetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
                 if (res.ok) {
                     const data = await res.json();
                     const online = data.filter(s => !s.is_offline).length;
@@ -69,8 +69,21 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
             }
         };
 
+        const fetchLocations = async () => {
+            try {
+                const res = await authFetch(`${API_BASE_URL}/api/admin/locations`);
+                if (res.ok) {
+                    const data = await res.json();
+                    setAvailableLocations(data);
+                }
+            } catch (e) {
+                console.error("Failed to fetch locations:", e);
+            }
+        };
+
         fetchUsers();
         fetchSystemStatus();
+        fetchLocations();
         const interval = setInterval(fetchSystemStatus, 30000);
         return () => clearInterval(interval);
     }, []);
@@ -127,6 +140,7 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
     const [showAddLGUModal, setShowAddLGUModal] = useState(false);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
     const [createdUserEmail, setCreatedUserEmail] = useState("");
+    const [availableLocations, setAvailableLocations] = useState(SITIOS_MABOLO);
     const [lguForm, setLguForm] = useState({
         full_name: "",
         email: "",
@@ -146,6 +160,11 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
     });
 
     const handleEditUserClick = (user) => {
+        // Enforce Admin Restriction: Admin account must not be editable
+        if (user.role === 'Super Admin') {
+            dialogs.alert("Restricted", "Super Admin accounts cannot be modified for security reasons.", 'info');
+            return;
+        }
         setEditingUser(user);
         setEditForm({
             status: user.status === 'Active' ? 'active' : 'inactive', // backend expects lowercase
@@ -189,6 +208,12 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
     };
 
     const handleDeleteUser = async (userId) => {
+        const userToDelete = users.find(u => u.id === userId);
+        if (userToDelete && userToDelete.role === 'Super Admin') {
+            dialogs.alert("Restricted", "Super Admin accounts cannot be deleted.", 'warning');
+            return;
+        }
+
         const result = await dialogs.confirm("Delete User", "Are you sure you want to delete this user? This action cannot be undone.");
         if (result.isConfirmed) {
             try {
@@ -264,7 +289,8 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
             <AdminSidebar variant={userRole} activePage="user-management" onNavigate={onNavigate} onLogout={onLogout} />
 
             <View style={styles.dashboardMain}>
-                <View style={styles.dashboardTopBar}>
+                <>
+                    <View style={styles.dashboardTopBar}>
                     <View>
                         <Text style={styles.dashboardTopTitle}>User Management</Text>
                         <Text style={styles.dashboardTopSubtitle}>
@@ -452,16 +478,18 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                                     <View style={styles.userColActions}>
                                         <View style={styles.userActionButtons}>
                                             <TouchableOpacity
-                                                style={styles.userActionButton}
+                                                style={[styles.userActionButton, user.role === 'Super Admin' && { opacity: 0.6, cursor: 'not-allowed' }]}
                                                 onPress={() => handleEditUserClick(user)}
+                                                disabled={user.role === 'Super Admin'}
                                             >
-                                                <Feather name="edit-2" size={16} color="#2563eb" />
+                                                <Feather name={user.role === 'Super Admin' ? "lock" : "edit-2"} size={16} color={user.role === 'Super Admin' ? "#64748b" : "#2563eb"} />
                                             </TouchableOpacity>
                                             <TouchableOpacity
-                                                style={[styles.userActionButton, { backgroundColor: '#ffffff', borderColor: '#e2e8f0' }]}
+                                                style={[styles.userActionButton, { backgroundColor: '#ffffff', borderColor: '#e2e8f0' }, user.role === 'Super Admin' && { opacity: 0.6, cursor: 'not-allowed' }]}
                                                 onPress={() => handleDeleteUser(user.id)}
+                                                disabled={user.role === 'Super Admin'}
                                             >
-                                                <Feather name="trash-2" size={16} color="#dc2626" />
+                                                <Feather name={user.role === 'Super Admin' ? "lock" : "trash-2"} size={16} color={user.role === 'Super Admin' ? "#94a3b8" : "#dc2626"} />
                                             </TouchableOpacity>
                                         </View>
                                     </View>
@@ -573,10 +601,10 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                                         {showSitioDropdown && (
                                             <View style={{ position: "absolute", top: 50, left: 0, right: 0, backgroundColor: "#fff", borderRadius: 8, borderWidth: 1, borderColor: "#e2e8f0", shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4, elevation: 5, maxHeight: 150, zIndex: 5000 }}>
                                                 <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }}>
-                                                    {SITIOS_MABOLO.map((sitio, index) => (
+                                                    {availableLocations.map((sitio, index) => (
                                                         <TouchableOpacity
                                                             key={index}
-                                                            style={{ paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: index === SITIOS_MABOLO.length - 1 ? 0 : 1, borderBottomColor: "#f1f5f9" }}
+                                                            style={{ paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: index === availableLocations.length - 1 ? 0 : 1, borderBottomColor: "#f1f5f9" }}
                                                             onPress={() => {
                                                                 setLguForm({ ...lguForm, barangay: sitio });
                                                                 setShowSitioDropdown(false);
@@ -782,8 +810,9 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                         </View>
                     </View>
                 )}
-            </View>
+            </>
         </View>
+    </View>
     );
 };
 

@@ -8,6 +8,7 @@ import LiveSensorStatus from "../components/LiveSensorStatus";
 import WelcomeBanner from "../components/WelcomeBanner";
 import { API_BASE_URL } from "../config/api";
 import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
+import { authFetch } from "../utils/helpers";
 import useDataSync from "../utils/useDataSync";
 
 const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
@@ -19,6 +20,7 @@ const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
     const [userName, setUserName] = useState("Admin User");
     const [msgCount, setMsgCount] = useState(0);
     const refreshRef = useRef(null);
+    
 
     useEffect(() => {
         if (typeof window !== "undefined" && window.localStorage) {
@@ -36,20 +38,24 @@ const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
             console.log("[Dashboard] Reading received:", reading);
             setMsgCount(c => c + 1);
             setLiveSensors(prev => {
-                const updated = prev.map(s =>
-                    s.id === reading.sensor_id
-                        ? {
-                            ...s,
-                            waterLevel:  reading.flood_level,
-                            rawDistance: reading.raw_distance || 0,
-                            status:      reading.is_offline ? "OFFLINE" : (reading.status || "NORMAL"),
-                          }
-                        : s
-                );
+                const updated = prev.map(s => {
+                    if (s.id !== reading.sensor_id) return s;
+                    // Only update data if sensor is enabled
+                    if (!s.enabled) return s;
+                    
+                    return {
+                        ...s,
+                        waterLevel:  reading.flood_level,
+                        rawDistance: reading.raw_distance || 0,
+                        is_live:     reading.is_live ?? true,
+                        enabled:     reading.enabled ?? true,
+                        status:      !(reading.is_live ?? true) ? "DISCONNECTED" : (!(reading.enabled ?? true) ? "OFF" : (reading.status || "NORMAL")),
+                    };
+                });
                 // Recompute stats from updated list
                 setStats(prevStats => ({
                     ...prevStats,
-                    active_sensors: updated.filter(s => s.status !== "OFFLINE").length,
+                    active_sensors: updated.filter(s => s.is_live && s.enabled).length,
                     avg_water_level: updated.length
                         ? updated.reduce((a, s) => a + (s.waterLevel || 0), 0) / updated.length
                         : prevStats.avg_water_level,
@@ -90,14 +96,34 @@ const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
 
     const fetchStats = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/dashboard/stats`);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            
+            const res = await authFetch(`${API_BASE_URL}/api/dashboard/stats`, {
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            
             if (res.ok) setStats(await res.json());
-        } catch (e) { /* silent */ }
+        } catch (e) { 
+            if (e.name === 'AbortError') {
+                console.warn("[Dashboard] Stats request timed out");
+            } else {
+                console.warn("[Dashboard] Stats request failed:", e.message);
+            }
+        }
     };
 
     const fetchAlerts = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/alerts/?status=active`);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            
+            const res = await authFetch(`${API_BASE_URL}/api/alerts/?status=active`, {
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            
             if (res.ok) {
                 const data = await res.json();
                 setRecentAlerts(data.slice(0, 5)); // show latest 5
@@ -107,22 +133,33 @@ const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
 
     const fetchSensors = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
-            if (!res.ok) return;
+            const res = await authFetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
+            if (!res.ok) {
+                console.error("[Dashboard] Failed to fetch sensors:", res.status);
+                return;
+            }
             const data = await res.json();
+            if (!Array.isArray(data)) {
+                console.error("[Dashboard] Sensors data is not an array:", data);
+                return;
+            }
             setLiveSensors(data.map(s => ({
                 id: s.id, name: s.name, location: s.barangay,
                 waterLevel: s.flood_level,
                 rawDistance: s.raw_distance || 0,
-                status: s.is_offline ? "OFFLINE" : (s.reading_status || "NORMAL"),
+                is_live: s.is_live,
+                enabled: s.enabled,
+                status: !s.is_live ? "DISCONNECTED" : (!s.enabled ? "OFF" : (s.reading_status || "NORMAL")),
                 battery: s.battery_level, signal: s.signal_strength,
             })));
-        } catch (e) { /* silent */ }
+        } catch (e) {
+            console.error("[Dashboard] fetchSensors error:", e);
+        }
     };
 
     const fetchThresholds = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/config/thresholds`);
+            const res = await authFetch(`${API_BASE_URL}/api/config/thresholds`);
             if (res.ok) setThresholds(await res.json());
         } catch (e) { /* silent */ }
     };
@@ -136,7 +173,7 @@ const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
     };
 
 
-    const onlineSensors = liveSensors.filter(s => s.status !== "OFFLINE").length;
+    const onlineSensors = liveSensors.filter(s => s.is_live).length;
 
     const statCards = [
         { label: "Active Sensors", value: stats.active_sensors, icon: "cpu", iconBg: "#dbeafe", iconColor: "#2563eb", sub: `${onlineSensors} online now` },
@@ -242,10 +279,12 @@ const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
                                     </View>
                                 ) : (
                                     liveSensors.map(sensor => {
-                                        const isOffline = sensor.status === "OFFLINE";
+                                        const isOffline = sensor.status === "DISCONNECTED";
+                                        const isOff = sensor.status === "OFF";
                                         
                                         const getLiveStatus = () => {
-                                            if (isOffline) return "OFFLINE";
+                                            if (isOffline) return "Disconnected";
+                                            if (isOff) return "OFF";
                                             const lvl = Number(sensor.waterLevel || 0);
                                             if (lvl >= thresholds.critical_level) return "CRITICAL";
                                             if (lvl >= thresholds.warning_level) return "WARNING";
@@ -254,8 +293,8 @@ const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
                                         };
                                         const liveStatus = getLiveStatus();
                                         const isWarn = liveStatus === "WARNING" || liveStatus === "CRITICAL";
-                                        const pillStyle = isOffline ? db.pillGray : isWarn ? styles.dashboardAlertBadgeWarning : styles.dashboardSensorStatusPill;
-                                        const pillTextStyle = isOffline ? db.pillGrayText : isWarn ? styles.dashboardAlertBadgeText : styles.dashboardSensorStatusText;
+                                        const pillStyle = (isOffline || isOff) ? db.pillGray : isWarn ? styles.dashboardAlertBadgeWarning : styles.dashboardSensorStatusPill;
+                                        const pillTextStyle = (isOffline || isOff) ? db.pillGrayText : isWarn ? styles.dashboardAlertBadgeText : styles.dashboardSensorStatusText;
                                         return (
                                             <View key={sensor.id} style={styles.dashboardSensorItem}>
                                                 <View style={{ flex: 1 }}>
@@ -263,9 +302,9 @@ const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
                                                     <Text style={styles.dashboardSensorMeta}>
                                                         Brgy. {sensor.location || "—"} ·{" "}
                                                         <Text style={styles.dashboardSensorMetaStrong}>
-                                                            {isOffline ? "OFFLINE" : `Flood: ${Number(sensor.waterLevel || 0).toFixed(1)} cm`}
+                                                            {(isOffline || isOff) ? "0.0 cm" : `Flood: ${Number(sensor.waterLevel || 0).toFixed(1)} cm`}
                                                         </Text>
-                                                        {!isOffline && (
+                                                        {(!isOffline && !isOff) && (
                                                             <Text> · Raw: <Text style={styles.dashboardSensorMetaStrong}>{Number(sensor.rawDistance || 0).toFixed(1)} cm</Text></Text>
                                                         )}
                                                         {" "}· Batt: <Text style={styles.dashboardSensorMetaStrong}>{sensor.battery ?? "—"}%</Text>

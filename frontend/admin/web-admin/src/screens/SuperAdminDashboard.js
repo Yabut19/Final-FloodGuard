@@ -9,6 +9,7 @@ import WelcomeBanner from "../components/WelcomeBanner";
 import { API_BASE_URL } from "../config/api";
 import useDataSync from "../utils/useDataSync";
 import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
+import { authFetch } from "../utils/helpers";
 
 const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) => {
     const [stats, setStats] = useState({ active_sensors: 0, active_alerts: 0, registered_users: 0, avg_water_level: 0 });
@@ -18,6 +19,7 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
     const [loading, setLoading] = useState(true);
     const [userName, setUserName] = useState("Super Admin");
     const refreshRef = useRef(null);
+    
 
     useEffect(() => {
         if (typeof window !== "undefined" && window.localStorage) {
@@ -39,13 +41,15 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
                             ...s,
                             waterLevel:  reading.flood_level,
                             rawDistance: reading.raw_distance || 0,
-                            status:      reading.is_offline ? "OFFLINE" : (reading.status || "NORMAL"),
+                            is_live:     reading.is_live ?? true,
+                            enabled:     reading.enabled ?? true,
+                            status:      !(reading.is_live ?? true) ? "DISCONNECTED" : (!(reading.enabled ?? true) ? "OFF" : (reading.status || "NORMAL")),
                           }
                         : s
                 );
                 setStats(prevStats => ({
                     ...prevStats,
-                    active_sensors: updated.filter(s => s.status !== "OFFLINE").length,
+                    active_sensors: updated.filter(s => s.is_live && s.enabled).length,
                     avg_water_level: updated.length
                         ? updated.reduce((a, s) => a + (s.waterLevel || 0), 0) / updated.length
                         : prevStats.avg_water_level,
@@ -80,14 +84,14 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
 
     const fetchStats = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/dashboard/stats`);
+            const res = await authFetch(`${API_BASE_URL}/api/dashboard/stats`);
             if (res.ok) setStats(await res.json());
         } catch (e) { /* silent */ }
     };
 
     const fetchAlerts = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/alerts/?status=active`);
+            const res = await authFetch(`${API_BASE_URL}/api/alerts/?status=active`);
             if (res.ok) {
                 const data = await res.json();
                 setRecentAlerts(data.slice(0, 5));
@@ -97,22 +101,33 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
 
     const fetchSensors = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
-            if (!res.ok) return;
+            const res = await authFetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
+            if (!res.ok) {
+                console.error("[SuperDashboard] Failed to fetch sensors:", res.status);
+                return;
+            }
             const data = await res.json();
+            if (!Array.isArray(data)) {
+                console.error("[SuperDashboard] Sensors data is not an array:", data);
+                return;
+            }
             setLiveSensors(data.map(s => ({
                 id: s.id, name: s.name, location: s.barangay,
                 waterLevel: s.flood_level,
                 rawDistance: s.raw_distance || 0,
-                status: s.is_offline ? "OFFLINE" : (s.reading_status || "NORMAL"),
+                is_live: s.is_live,
+                enabled: s.enabled,
+                status: !s.is_live ? "DISCONNECTED" : (!s.enabled ? "OFF" : (s.reading_status || "NORMAL")),
                 battery: s.battery_level, signal: s.signal_strength,
             })));
-        } catch (e) { /* silent */ }
+        } catch (e) {
+            console.error("[SuperDashboard] fetchSensors error:", e);
+        }
     };
 
     const fetchThresholds = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/api/config/thresholds`);
+            const res = await authFetch(`${API_BASE_URL}/api/config/thresholds`);
             if (res.ok) setThresholds(await res.json());
         } catch (e) { /* silent */ }
     };
@@ -134,8 +149,8 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
         return `${Math.floor(diff / 86400)}d ago`;
     };
 
-    const onlineSensors = liveSensors.filter(s => s.status !== "OFFLINE").length;
-    const warningSensors = liveSensors.filter(s => s.status === "WARNING" || s.status === "CRITICAL").length;
+    const onlineSensors = liveSensors.filter(s => s.is_live).length;
+    const warningSensors = liveSensors.filter(s => s.is_live && s.enabled && (s.status === "WARNING" || s.status === "CRITICAL")).length;
 
     const statCards = [
         { label: "Active Sensors", value: stats.active_sensors, icon: "cpu", iconBg: "#dbeafe", iconColor: "#2563eb", sub: `${onlineSensors} online now` },
@@ -241,10 +256,11 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
                                     </View>
                                 ) : (
                                     liveSensors.map(sensor => {
-                                        const isOffline = sensor.status === "OFFLINE";
+                                        const isOffline = sensor.status === "DISCONNECTED";
+                                        const isOff = sensor.status === "OFF";
                                         const isWarn = sensor.status === "WARNING" || sensor.status === "CRITICAL";
-                                        const pillStyle = isOffline ? sd.pillGray : isWarn ? styles.dashboardAlertBadgeWarning : styles.dashboardSensorStatusPill;
-                                        const pillTextStyle = isOffline ? sd.pillGrayText : isWarn ? styles.dashboardAlertBadgeText : styles.dashboardSensorStatusText;
+                                        const pillStyle = (isOffline || isOff) ? sd.pillGray : isWarn ? styles.dashboardAlertBadgeWarning : styles.dashboardSensorStatusPill;
+                                        const pillTextStyle = (isOffline || isOff) ? sd.pillGrayText : isWarn ? styles.dashboardAlertBadgeText : styles.dashboardSensorStatusText;
                                         return (
                                             <View key={sensor.id} style={styles.dashboardSensorItem}>
                                                 <View style={{ flex: 1 }}>
@@ -252,9 +268,9 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
                                                     <Text style={styles.dashboardSensorMeta}>
                                                         Brgy. {sensor.location || "—"} ·{" "}
                                                         <Text style={styles.dashboardSensorMetaStrong}>
-                                                            {isOffline ? "OFFLINE" : `Flood: ${Number(sensor.waterLevel || 0).toFixed(1)} cm`}
+                                                            {(isOffline || isOff) ? sensor.status : `Flood: ${Number(sensor.waterLevel || 0).toFixed(1)} cm`}
                                                         </Text>
-                                                        {!isOffline && (
+                                                        {(!isOffline && !isOff) && (
                                                             <Text> · Raw: <Text style={styles.dashboardSensorMetaStrong}>{Number(sensor.rawDistance || 0).toFixed(1)} cm</Text></Text>
                                                         )}
                                                         {" "}· Batt: <Text style={styles.dashboardSensorMetaStrong}>{sensor.battery ?? "—"}%</Text>

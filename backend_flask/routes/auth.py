@@ -14,8 +14,8 @@ auth_bp = Blueprint('auth', __name__)
 def _emit_user_update():
     """Broadcast user list change to all WebSocket clients."""
     try:
-        from app import socketio
-        socketio.emit("user_update", {"message": "refresh"})
+        from socket_instance import socketio
+        socketio.emit("user_update", {"message": "refresh"}, namespace="/")
     except Exception:
         pass
 
@@ -39,6 +39,11 @@ def login():
         logger.debug("Found user: %s role=%s", user.username, user.role)
 
     if user and user.check_password(password):
+        # --- Account Status Validation ---
+        if user.status == 'inactive':
+            logger.warning("Login blocked for inactive account: %s", username)
+            return jsonify({"error": "Account is inactive. Please contact support."}), 403
+        
         # --- Strict Role Validation ---
         if required_role == 'admin':
             if user.role != 'super_admin':

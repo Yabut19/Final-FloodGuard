@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { View, Platform, ActivityIndicator, Text } from "react-native";
+import { View, Platform, ActivityIndicator, Text, TouchableOpacity } from "react-native";
 import {
   useFonts,
   Poppins_400Regular,
@@ -22,12 +22,17 @@ import ManageSensorsPage from "./src/screens/SensorRegistrationPage";
 import LoadingOverlay from "./src/components/LoadingOverlay";
 
 export default function App() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Poppins_400Regular,
     Poppins_500Medium,
     Poppins_600SemiBold,
     Poppins_700Bold,
   });
+
+  // Handle font loading error - fallback to system fonts
+  if (fontError) {
+    console.warn("Font loading error, falling back to system fonts:", fontError);
+  }
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState("lgu"); // "lgu" or "superadmin"
@@ -36,6 +41,14 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [publicPage, setPublicPage] = useState("home");
   const [openLogin, setOpenLogin] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleError = (error, errorInfo) => {
+    console.error('Application Error:', error, errorInfo);
+    setHasError(true);
+    setError(error);
+  };
 
   const getInitialBgColor = () => {
     if (Platform.OS === "web") {
@@ -48,29 +61,40 @@ export default function App() {
 
   useEffect(() => {
     if (Platform.OS === "web") {
-      const token = localStorage.getItem("authToken");
-      const savedRole = localStorage.getItem("userRole"); // "super_admin" or "lgu_admin"
+      try {
+        const token = localStorage.getItem("authToken");
+        const savedRole = localStorage.getItem("userRole"); // "super_admin" or "lgu_admin"
 
-      if (token && savedRole) {
-        setIsLoggedIn(true);
-        document.body.style.backgroundColor = token ? "#ECFAE5" : "#001D39";
-        const roleStr = savedRole === "super_admin" ? "superadmin" : "lgu";
-        setUserRole(roleStr);
+        if (token && savedRole) {
+          setIsLoggedIn(true);
+          if (document && document.body) {
+            document.body.style.backgroundColor = token ? "#ECFAE5" : "#001D39";
+          }
+          const roleStr = (savedRole === "super_admin" || savedRole === "admin") ? "superadmin" : "lgu";
+          setUserRole(roleStr);
 
-        const savedPage = localStorage.getItem("activePage");
-        if (savedPage) {
-          setActivePage(savedPage);
+          const savedPage = localStorage.getItem("activePage");
+          if (savedPage) {
+            setActivePage(savedPage);
+          }
         }
+      } catch (error) {
+        console.warn("Error accessing localStorage:", error);
+        // Continue with default state if localStorage fails
       }
     }
   }, []);
 
   const handleLoginSuccess = (role) => {
     setIsLoggedIn(true);
-    setUserRole(role === "admin" ? "superadmin" : "lgu");
+    setUserRole((role === "admin" || role === "super_admin") ? "superadmin" : "lgu");
     setActivePage("overview");
     if (Platform.OS === "web") {
-      localStorage.setItem("activePage", "overview");
+      try {
+        localStorage.setItem("activePage", "overview");
+      } catch (error) {
+        console.warn("Error setting localStorage on login:", error);
+      }
     }
   };
 
@@ -81,11 +105,17 @@ export default function App() {
       setUserRole("lgu");
       setActivePage("overview");
       if (Platform.OS === "web") {
-        localStorage.removeItem("authToken");
-        localStorage.removeItem("userRole");
-        localStorage.removeItem("activePage");
-        sessionStorage.removeItem("welcomeBannerShown");
-        document.body.style.backgroundColor = "#001D39";
+        try {
+          localStorage.removeItem("authToken");
+          localStorage.removeItem("userRole");
+          localStorage.removeItem("activePage");
+          sessionStorage.removeItem("welcomeBannerShown");
+          if (document && document.body) {
+            document.body.style.backgroundColor = "#001D39";
+          }
+        } catch (error) {
+          console.warn("Error clearing localStorage on logout:", error);
+        }
       }
       setIsLoading(false);
     }, 1500);
@@ -94,7 +124,11 @@ export default function App() {
   const handleNavigate = (page) => {
     setActivePage(page);
     if (Platform.OS === "web") {
-      localStorage.setItem("activePage", page);
+      try {
+        localStorage.setItem("activePage", page);
+      } catch (error) {
+        console.warn("Error setting localStorage on navigate:", error);
+      }
     }
   };
 
@@ -113,7 +147,21 @@ export default function App() {
     return { email: "", username: "", role: "" };
   };
 
-  if (!fontsLoaded) {
+  // Add timeout for font loading to prevent infinite loading
+  const [fontTimeout, setFontTimeout] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!fontsLoaded && !fontError) {
+        console.warn("Font loading timeout - proceeding with fallback fonts");
+        setFontTimeout(true);
+      }
+    }, 5000); // 5 second timeout
+
+    return () => clearTimeout(timer);
+  }, [fontsLoaded, fontError]);
+
+  if (!fontsLoaded && !fontError && !fontTimeout) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
         <ActivityIndicator size="large" color="#4a7c59" />
@@ -164,10 +212,35 @@ export default function App() {
     }
   };
 
-  return (
-    <View style={styles.root}>
-      {renderPage()}
-      {isLoading && <LoadingOverlay message="Logging Out..." accentColor="#ef4444" />}
-    </View>
-  );
+
+  if (hasError) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: '#f8fafc' }}>
+        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#dc2626', marginBottom: 16 }}>
+          Application Error
+        </Text>
+        <Text style={{ fontSize: 14, color: '#64748b', textAlign: 'center', marginBottom: 24 }}>
+          Something went wrong. Please refresh the page.
+        </Text>
+        <TouchableOpacity 
+          onPress={() => window.location.reload()}
+          style={{ backgroundColor: '#3b82f6', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8 }}
+        >
+          <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>Refresh</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  try {
+    return (
+      <View style={styles.root}>
+        {renderPage()}
+        {isLoading && <LoadingOverlay message="Logging Out..." accentColor="#ef4444" />}
+      </View>
+    );
+  } catch (error) {
+    handleError(error);
+    return null;
+  }
 }

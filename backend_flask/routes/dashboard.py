@@ -15,7 +15,7 @@ def get_stats():
         FROM sensors s
         JOIN iot_readings r ON s.id = r.sensor_id
         WHERE s.status = 'active'
-        AND r.created_at >= DATE_SUB(%s, INTERVAL 5 SECOND)
+        AND r.created_at >= DATE_SUB(%s, INTERVAL 30 SECOND)
     """, (format_pst(get_pst_now()),))
     active_sensors = cursor.fetchone()['count']
     

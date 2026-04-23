@@ -8,6 +8,7 @@ import { API_BASE_URL } from "../config/api";
 import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
 import useDataSync from "../utils/useDataSync";
 import dialogs from "../utils/dialogs";
+import { authFetch } from "../utils/helpers";
 
 const { width } = Dimensions.get("window");
 const SIDEBAR_WIDTH = width > 1024 ? 360 : 300;
@@ -34,7 +35,7 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
     const fetchData = async () => {
         try {
             setLoading(true);
-            const response = await fetch(`${API_BASE}/api/reports/pending/with-sensor-data`);
+            const response = await authFetch(`${API_BASE}/api/reports/pending/with-sensor-data`);
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             
             const data = await response.json();
@@ -79,7 +80,7 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
 
         try {
             setSubmittingVerify(true);
-            const response = await fetch(`${API_BASE}/api/reports/${selectedReport.id}/verify`, {
+            const response = await authFetch(`${API_BASE}/api/reports/${selectedReport.id}/verify`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -112,7 +113,7 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
 
         try {
             setSubmittingReject(true);
-            const response = await fetch(`${API_BASE}/api/reports/${selectedReport.id}/reject`, {
+            const response = await authFetch(`${API_BASE}/api/reports/${selectedReport.id}/reject`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -197,10 +198,10 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                         </Text>
                     </View>
                     <View style={styles.dashboardTopRight}>
-                        <View style={[styles.dashboardStatusPill, { backgroundColor: sensorData && !sensorData.is_offline ? "rgba(22, 163, 74, 0.1)" : "rgba(100, 116, 139, 0.1)", marginRight: 8 }]}>
-                            <View style={[styles.dashboardStatusDot, { backgroundColor: sensorData && !sensorData.is_offline ? "#16a34a" : "#64748b" }]} />
-                            <Text style={[styles.dashboardStatusText, { color: sensorData && !sensorData.is_offline ? "#16a34a" : "#64748b" }]}>
-                                {sensorData && !sensorData.is_offline ? "Online" : "Offline"}
+                        <View style={[styles.dashboardStatusPill, { backgroundColor: sensorData && sensorData.is_live ? "rgba(22, 163, 74, 0.1)" : "rgba(100, 116, 139, 0.1)", marginRight: 8 }]}>
+                            <View style={[styles.dashboardStatusDot, { backgroundColor: sensorData && sensorData.is_live ? "#16a34a" : "#64748b" }]} />
+                            <Text style={[styles.dashboardStatusText, { color: sensorData && sensorData.is_live ? "#16a34a" : "#64748b" }]}>
+                                {sensorData && sensorData.is_live ? "LIVE" : "DISCONNECTED"}
                             </Text>
                         </View>
                         <View style={[styles.dashboardStatusPill, { backgroundColor: "rgba(249, 115, 22, 0.15)" }]}>

@@ -22,12 +22,18 @@ export default function useDataSync(callbacks = {}) {
     if (typeof window === "undefined") return;
 
     const socket = io(API_BASE_URL, {
-      transports: ["websocket", "polling"],
+      transports: ["polling"],
+      timeout: 10000,
+      forceNew: true,
+      reconnectionAttempts: 5
     });
     socketRef.current = socket;
 
     socket.on("connect", () => {
       console.log("[DataSync] Connected to WebSocket");
+    });
+    socket.on("connect_error", (err) => {
+      console.error("[DataSync] Connection error:", err.message);
     });
 
     // 🌡️ Live Sensor Reading Updates

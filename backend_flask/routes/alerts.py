@@ -11,7 +11,7 @@ alerts_bp = Blueprint('alerts', __name__)
 def _emit_alert_update():
     """Broadcast alert changes to all WebSocket clients."""
     try:
-        from app import socketio
+        from socket_instance import socketio
         socketio.emit("alert_update", {"message": "refresh"}, namespace="/")
     except Exception:
         pass
@@ -179,7 +179,7 @@ def create_alert():
     
     # ── REAL-TIME BROADCAST: Deliver instantly to mobile apps (latency < 200ms) ──
     try:
-        from app import socketio
+        from socket_instance import socketio
         
         # Point 4: Mobile App Notification Rules (Evacuation Alerts)
         if level == 'evacuation':

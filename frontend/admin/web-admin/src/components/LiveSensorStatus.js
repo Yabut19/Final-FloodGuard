@@ -17,7 +17,10 @@ const getStatusColor = (status) => {
         case 'CRITICAL':
             return '#dc2626'; // Red
         case 'OFFLINE':
+        case 'DISCONNECTED':
             return '#94a3b8';
+        case 'OFF':
+            return '#cbd5e1';
         default:
             return '#cbd5e1';
     }
@@ -36,7 +39,10 @@ const getStatusBgColor = (status) => {
         case 'CRITICAL':
             return 'rgba(220, 38, 38, 0.15)';
         case 'OFFLINE':
+        case 'DISCONNECTED':
             return 'rgba(148, 163, 184, 0.15)';
+        case 'OFF':
+            return 'rgba(203, 213, 225, 0.15)';
         default:
             return 'rgba(203, 213, 225, 0.15)';
     }
@@ -159,10 +165,13 @@ const WaterWave = ({ color, isOffline }) => {
 
 // ── Each card is its own component with its own Animated state ───────────────
 const SensorCard = ({ sensor, isLast, thresholds }) => {
-    const isOffline = (sensor.status || '').toUpperCase() === 'OFFLINE';
-    
     const getLiveStatus = () => {
-        if (isOffline) return "OFFLINE";
+        // Check if sensor is enabled first
+        if (sensor.enabled === false) return "OFF";
+        
+        const s = (sensor.status || '').toUpperCase();
+        if (s === 'DISCONNECTED' || s === 'OFFLINE') return "DISCONNECTED";
+        if (s === 'OFF') return "OFF";
         const lvl = Number(sensor.waterLevel || 0);
         if (lvl >= (thresholds?.critical_level || 50)) return "CRITICAL";
         if (lvl >= (thresholds?.warning_level || 30)) return "WARNING";
@@ -171,8 +180,10 @@ const SensorCard = ({ sensor, isLast, thresholds }) => {
     };
 
     const liveStatus = getLiveStatus();
+    const isOffline = liveStatus === 'DISCONNECTED';
+    const isGaugeActive = liveStatus !== 'DISCONNECTED' && liveStatus !== 'OFF';
     const maxLevel = thresholds?.critical_level || 50;
-    const targetFill = isOffline ? 0 : Math.min((Number(sensor.waterLevel) / maxLevel) * 100, 100);
+    const targetFill = !isGaugeActive ? 0 : Math.min((Number(sensor.waterLevel) / maxLevel) * 100, 100);
     const color = getStatusColor(liveStatus);
 
     // Smooth animated height — prevents flicker on 1s refresh
@@ -220,7 +231,7 @@ const SensorCard = ({ sensor, isLast, thresholds }) => {
                         height: animatedHeight,
                         overflow: 'hidden',
                     }}>
-                        <WaterWave color={color} isOffline={isOffline} />
+                        <WaterWave color={color} isOffline={!isGaugeActive} />
                     </Animated.View>
 
                     {/* Scale Markers — Dynamic based on critical threshold */}
@@ -243,7 +254,7 @@ const SensorCard = ({ sensor, isLast, thresholds }) => {
 
             {/* Value & Badge */}
             <View style={styles.sensorCardValueSection}>
-                {isOffline ? (
+                {!isGaugeActive ? (
                     <Text style={[styles.sensorCardValueLabel, { color: '#94a3b8' }]}>
                         0.0<Text style={styles.sensorCardValueUnit}>cm</Text>
                     </Text>
@@ -255,13 +266,13 @@ const SensorCard = ({ sensor, isLast, thresholds }) => {
                 )}
                 {/* Raw distance — lets you verify the IoT device is sending data */}
                 <Text style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'Poppins_400Regular', marginTop: 2 }}>
-                    {isOffline
+                    {!isGaugeActive
                         ? 'Raw: 0.0 cm'
                         : `Raw dist: ${Number(sensor.rawDistance || 0).toFixed(1)} cm`}
                 </Text>
                 <View style={[styles.sensorCardBadge, { backgroundColor: getStatusBgColor(liveStatus) }]}>
                     <Text style={[styles.sensorCardBadgeText, { color: getStatusColor(liveStatus) }]}>
-                        {isOffline ? 'SENSOR OFFLINE' : liveStatus.toUpperCase()}
+                        {liveStatus === 'DISCONNECTED' ? 'DISCONNECTED' : (liveStatus === 'OFF' ? 'SYSTEM OFF' : liveStatus.toUpperCase())}
                     </Text>
                 </View>
             </View>

@@ -6,6 +6,7 @@ import { styles } from "../styles/globalStyles";
 import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
 import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
+import { authFetch } from "../utils/helpers";
 import { API_BASE_URL } from "../config/api";
 import useDataSync from "../utils/useDataSync";
 import dialogs from "../utils/dialogs";
@@ -40,7 +41,7 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
 
     const fetchCenters = async () => {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/evacuation-centers/`);
+            const response = await authFetch(`${API_BASE_URL}/api/evacuation-centers/`);
             const data = await response.json();
             if (response.ok) {
                 setCenters(data);
@@ -55,7 +56,7 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
     useEffect(() => {
         const fetchSystemStatus = async () => {
             try {
-                const res = await fetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
+                const res = await authFetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
                 if (res.ok) {
                     const data = await res.json();
                     const online = data.filter(s => !s.is_offline).length;
@@ -194,7 +195,7 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
 
         setIsSubmitting(true);
         try {
-            const response = await fetch(`${API_BASE_URL}/api/evacuation-centers/`, {
+            const response = await authFetch(`${API_BASE_URL}/api/evacuation-centers/`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -227,7 +228,7 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
         if (!editingCenter) return;
         setIsSubmitting(true);
         try {
-            const response = await fetch(`${API_BASE_URL}/api/evacuation-centers/${editingCenter.id}`, {
+            const response = await authFetch(`${API_BASE_URL}/api/evacuation-centers/${editingCenter.id}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -257,7 +258,7 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
         const result = await dialogs.confirm("Delete Center", "Are you sure you want to delete this evacuation center?");
         if (result.isConfirmed) {
             try {
-                const response = await fetch(`${API_BASE_URL}/api/evacuation-centers/${id}`, {
+                const response = await authFetch(`${API_BASE_URL}/api/evacuation-centers/${id}`, {
                     method: "DELETE"
                 });
                 if (response.ok) {
