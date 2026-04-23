@@ -6,8 +6,10 @@ import { styles } from "../styles/globalStyles";
 import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
 import { API_BASE_URL } from "../config/api";
+import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
 import { authFetch } from "../utils/helpers";
-import useUserSocket from "../utils/useUserSocket";
+import useDataSync from "../utils/useDataSync";
+import dialogs from "../utils/dialogs";
 
 const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) => {
     const [searchQuery, setSearchQuery] = useState("");
@@ -54,13 +56,41 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
     };
 
     useEffect(() => {
+        const fetchSystemStatus = async () => {
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const online = data.filter(s => !s.is_offline).length;
+                    setOnlineSensors(online);
+                }
+            } catch (e) {
+                console.error("Status fetch error:", e);
+            }
+        };
+
         fetchUsers();
+        fetchSystemStatus();
+        const interval = setInterval(fetchSystemStatus, 30000);
+        return () => clearInterval(interval);
     }, []);
 
-    // Listen for real-time user updates (registration, deletion, role change, etc.)
-    useUserSocket(() => {
-        console.log("Real-time update: Refreshing user list...");
-        fetchUsers();
+    // ── Real-time Data Synchronization ──
+    useDataSync({
+        onUserUpdate: () => {
+            console.log("[UserManagement] User list changed, refreshing...");
+            fetchUsers();
+        },
+        onSensorUpdate: (reading) => {
+             // Optional: update the system status indicator live if readings come in
+             // but we already have fetchSystemStatus polling. 
+             // We can just rely on the sync event if needed.
+        },
+        onSensorListUpdate: () => {
+            // If sensors go online/offline, update the status indicator
+            // (Re-using the existing logic by calling the fetcher or just knowing there's a change)
+            // But for simplicity, let's just use user_update for the list.
+        }
     });
 
     const getRoleBadgeStyle = (role) => {
@@ -108,6 +138,7 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
 
     // Edit User Modal State
     const [showEditUserModal, setShowEditUserModal] = useState(false);
+    const [onlineSensors, setOnlineSensors] = useState(0);
     const [editingUser, setEditingUser] = useState(null);
     const [editForm, setEditForm] = useState({
         status: "",
@@ -144,34 +175,35 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
             });
 
             if (statusRes.ok && roleRes.ok) {
-                alert("User updated successfully");
+                dialogs.success("Updated", "User updated successfully");
                 setShowEditUserModal(false);
                 fetchUsers();
             } else {
-                alert("Failed to update user. Please try again.");
+                dialogs.error("Error", "Failed to update user. Please try again.");
             }
         } catch (error) {
-            alert("Network error updating user");
+            dialogs.error("Error", "Network error updating user");
         } finally {
             setIsSubmitting(false);
         }
     };
 
     const handleDeleteUser = async (userId) => {
-        if (confirm("Are you sure you want to delete this user? This action cannot be undone.")) {
+        const result = await dialogs.confirm("Delete User", "Are you sure you want to delete this user? This action cannot be undone.");
+        if (result.isConfirmed) {
             try {
                 const response = await authFetch(`${API_BASE_URL}/api/admin/users/${userId}`, {
                     method: "DELETE"
                 });
                 if (response.ok) {
-                    alert("User deleted successfully");
+                    dialogs.success("Deleted", "User deleted successfully");
                     fetchUsers();
                 } else {
                     const data = await response.json();
-                    alert("Failed to delete user: " + (data.error || "Unknown error"));
+                    dialogs.error("Error", "Failed to delete user: " + (data.error || "Unknown error"));
                 }
             } catch (error) {
-                alert("Network error deleting user");
+                dialogs.error("Error", "Network error deleting user");
             }
         }
     };
@@ -185,7 +217,7 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
 
     const handleCreateUser = async () => {
         if (!lguForm.email || (!lguForm.password && lguForm.role !== 'lgu_admin')) {
-            alert("Please fill in the required fields.");
+            dialogs.alert("Validation", "Please fill in the required fields.", 'warning');
             return;
         }
 
@@ -218,10 +250,10 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                 setLguForm({ full_name: "", email: "", role: "lgu_admin", barangay: "", password: "" });
                 fetchUsers();
             } else {
-                alert("Error: " + (data.error || "Failed to create account"));
+                dialogs.error("Error", "Error: " + (data.error || "Failed to create account"));
             }
         } catch (error) {
-            alert("Network error creating user");
+            dialogs.error("Error", "Network error creating user");
         } finally {
             setIsSubmitting(false);
         }
@@ -240,9 +272,11 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                         </Text>
                     </View>
                     <View style={styles.dashboardTopRight}>
-                        <View style={styles.dashboardStatusPill}>
-                            <View style={styles.dashboardStatusDot} />
-                            <Text style={styles.dashboardStatusText}>System Online</Text>
+                        <View style={[styles.dashboardStatusPill, { backgroundColor: onlineSensors >= 1 ? "rgba(22, 163, 74, 0.1)" : "rgba(100, 116, 139, 0.1)" }]}>
+                            <View style={[styles.dashboardStatusDot, { backgroundColor: getSystemStatusColor(onlineSensors) }]} />
+                            <Text style={[styles.dashboardStatusText, { color: getSystemStatusColor(onlineSensors) }]}>
+                                {getSystemStatus(onlineSensors)}
+                            </Text>
                         </View>
                         <RealTimeClock style={styles.dashboardTopDate} />
                     </View>
@@ -412,7 +446,7 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                                     </View>
 
                                     <View style={styles.userColJoined}>
-                                        <Text style={styles.userCellText}>{user.joined}</Text>
+                                        <Text style={styles.userCellText}>{formatPST(user.joined)}</Text>
                                     </View>
 
                                     <View style={styles.userColActions}>

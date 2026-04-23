@@ -4,6 +4,7 @@ import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { styles } from "../styles/globalStyles";
 import { API_BASE_URL } from "../config/api";
+import dialogs from "../utils/dialogs";
 
 const AdminSidebar = ({ activePage, onNavigate, onLogout, variant = "lgu" }) => {
     const isSuperAdmin = variant === "superadmin";
@@ -117,7 +118,7 @@ const AdminSidebar = ({ activePage, onNavigate, onLogout, variant = "lgu" }) => 
                 } else {
                     const errData = await avatarRes.json();
                     console.error("Avatar upload failed:", errData);
-                    alert("Failed to upload avatar, but proceeding with profile update.");
+                    dialogs.alert("Warning", "Failed to upload avatar, but proceeding with profile update.", 'warning');
                 }
             }
 
@@ -132,7 +133,7 @@ const AdminSidebar = ({ activePage, onNavigate, onLogout, variant = "lgu" }) => 
 
             const data = await response.json();
             if (response.ok) {
-                alert("Profile updated successfully");
+                dialogs.success("Updated", "Profile updated successfully");
                 setUserName(profileForm.full_name);
                 localStorage.setItem("userName", profileForm.full_name);
 
@@ -141,11 +142,11 @@ const AdminSidebar = ({ activePage, onNavigate, onLogout, variant = "lgu" }) => 
                 setSelectedAvatarFile(null);
                 setIsProfileModalVisible(false);
             } else {
-                alert(data.error || "Failed to update profile");
+                dialogs.error("Error", data.error || "Failed to update profile");
             }
         } catch (error) {
             console.error("Error updating profile:", error);
-            alert("Error updating profile");
+            dialogs.error("Error", "Error updating profile");
         } finally {
             setIsSaving(false);
         }

@@ -1,7 +1,16 @@
 from flask import Blueprint, request, jsonify
 from utils.db import get_db
+from utils.timezone_utils import get_pst_now, format_pst
 
 evacuation_bp = Blueprint('evacuation', __name__)
+
+def _emit_evacuation_update():
+    """Broadcast evacuation center changes to all WebSocket clients."""
+    try:
+        from app import socketio
+        socketio.emit("evacuation_update", {"message": "refresh"}, namespace="/")
+    except Exception:
+        pass
 
 @evacuation_bp.route('/', methods=['GET'])
 def get_evacuation_centers():
@@ -42,8 +51,8 @@ def create_evacuation_center():
         alert_description = f"{name} in {location} is now available for residents. Capacity: {capacity}."
         cursor.execute("""
             INSERT INTO alerts (title, description, level, barangay, status, evacuation_status, evacuation_location, evacuation_capacity, timestamp)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
-        """, (alert_title, alert_description, 'evacuation', 'All', 'active', 'open', location, capacity))
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (alert_title, alert_description, 'evacuation', 'All', 'active', 'open', location, capacity, format_pst(get_pst_now())))
 
         db.commit()
         center_id = cursor.lastrowid
@@ -62,6 +71,8 @@ def create_evacuation_center():
                 "capacity": capacity
             }, namespace="/")
         except: pass
+
+        _emit_evacuation_update()
 
         return jsonify({"message": "Evacuation center created successfully", "id": center_id}), 201
     except Exception as e:
@@ -113,8 +124,8 @@ def update_evacuation_center(center_id):
                 alert_description = f"Center {c[0]} status is now {c[2].upper()}. Location: {c[1]}."
                 cursor.execute("""
                     INSERT INTO alerts (title, description, level, barangay, status, evacuation_status, evacuation_location, evacuation_capacity, timestamp)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                """, (alert_title, alert_description, 'evacuation', 'All', 'active', c[2], c[1], c[3]))
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (alert_title, alert_description, 'evacuation', 'All', 'active', c[2], c[1], c[3], format_pst(get_pst_now())))
 
         db.commit()
 
@@ -123,6 +134,8 @@ def update_evacuation_center(center_id):
             from app import socketio
             socketio.emit("new_notification", {"type": "alert", "level": "evacuation"}, namespace="/")
         except: pass
+
+        _emit_evacuation_update()
 
         return jsonify({"message": "Evacuation center updated successfully"}), 200
     except Exception as e:
@@ -137,6 +150,9 @@ def delete_evacuation_center(center_id):
     try:
         cursor.execute("DELETE FROM evacuation_centers WHERE id = %s", (center_id,))
         db.commit()
+        
+        _emit_evacuation_update()
+
         return jsonify({"message": "Evacuation center deleted successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500

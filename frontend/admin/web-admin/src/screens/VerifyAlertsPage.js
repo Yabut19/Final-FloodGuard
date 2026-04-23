@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
-import { View, Text, ScrollView, TouchableOpacity, Modal, ActivityIndicator, Alert, TextInput, Image, Animated, Dimensions } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, Modal, ActivityIndicator, TextInput, Image, Animated, Dimensions } from "react-native";
 import { Feather, MaterialCommunityIcons, Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { styles } from "../styles/globalStyles";
 import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
 import { API_BASE_URL } from "../config/api";
+import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
+import useDataSync from "../utils/useDataSync";
+import dialogs from "../utils/dialogs";
 
 const { width } = Dimensions.get("window");
 const SIDEBAR_WIDTH = width > 1024 ? 360 : 300;
@@ -39,7 +42,7 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
             setSensorData(data.latest_sensor_data);
         } catch (error) {
             console.error("Failed to fetch reports:", error);
-            Alert.alert("Error", "Failed to fetch pending reports");
+            dialogs.error("Error", "Failed to fetch pending reports");
         } finally {
             setLoading(false);
         }
@@ -47,25 +50,19 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
 
     useEffect(() => {
         fetchData();
-        const interval = setInterval(fetchData, 5000);
-
-        let es;
-        if (typeof EventSource !== "undefined") {
-            es = new EventSource(`${API_BASE}/api/iot/stream`);
-            es.onmessage = (e) => {
-                try {
-                    const d = JSON.parse(e.data);
-                    setSensorData(prev => prev ? { ...prev, ...d } : d);
-                } catch (_) {}
-            };
-            es.onerror = () => es.close();
-        }
-
-        return () => {
-            clearInterval(interval);
-            if (es) es.close();
-        };
     }, []);
+
+    // ── Real-time Data Synchronization ──
+    useDataSync({
+        onReportUpdate: () => {
+            console.log("[VerifyAlerts] Community reports changed, refreshing...");
+            fetchData();
+        },
+        onSensorUpdate: (reading) => {
+            console.log("[VerifyAlerts] Sensor reading updated:", reading);
+            setSensorData(prev => prev ? { ...prev, ...reading } : reading);
+        }
+    });
 
     const handleVerify = async () => {
         if (!selectedReport) return;
@@ -99,12 +96,12 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                 throw new Error(error.error || "Verification failed");
             }
 
-            Alert.alert("Success", "Report verified and broadcasted to all subscribers!");
+            dialogs.success("Success", "Report verified and broadcasted to all subscribers!");
             setShowVerifyModal(false);
             fetchData(); // Refresh the list
         } catch (error) {
             console.error("Verification error:", error);
-            Alert.alert("Error", error.message);
+            dialogs.error("Error", error.message);
         } finally {
             setSubmittingVerify(false);
         }
@@ -129,12 +126,12 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                 throw new Error(error.error || "Rejection failed");
             }
 
-            Alert.alert("Success", "Report dismissed from queue");
+            dialogs.success("Success", "Report dismissed from queue");
             setShowVerifyModal(false);
             fetchData(); // Refresh the list
         } catch (error) {
             console.error("Rejection error:", error);
-            Alert.alert("Error", error.message);
+            dialogs.error("Error", error.message);
         } finally {
             setSubmittingReject(false);
         }
@@ -200,6 +197,12 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                         </Text>
                     </View>
                     <View style={styles.dashboardTopRight}>
+                        <View style={[styles.dashboardStatusPill, { backgroundColor: sensorData && !sensorData.is_offline ? "rgba(22, 163, 74, 0.1)" : "rgba(100, 116, 139, 0.1)", marginRight: 8 }]}>
+                            <View style={[styles.dashboardStatusDot, { backgroundColor: sensorData && !sensorData.is_offline ? "#16a34a" : "#64748b" }]} />
+                            <Text style={[styles.dashboardStatusText, { color: sensorData && !sensorData.is_offline ? "#16a34a" : "#64748b" }]}>
+                                {sensorData && !sensorData.is_offline ? "Online" : "Offline"}
+                            </Text>
+                        </View>
                         <View style={[styles.dashboardStatusPill, { backgroundColor: "rgba(249, 115, 22, 0.15)" }]}>
                             <View style={[styles.dashboardStatusDot, { backgroundColor: "#f97316" }]} />
                             <Text style={[styles.dashboardStatusText, { color: "#ea580c" }]}>
@@ -272,7 +275,7 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                                 <View style={{ flex: 1 }}>
                                     <Text style={{ color: "#94a3b8", fontSize: 11, marginBottom: 4 }}>Updated</Text>
                                     <Text style={{ color: "#0f172a", fontSize: 14, fontFamily: "Poppins_600SemiBold" }}>
-                                        {new Date(sensorData.created_at).toLocaleTimeString()}
+                                        {formatPST(sensorData.created_at)}
                                     </Text>
                                 </View>
                             </View>
@@ -414,7 +417,7 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                                             <View style={{ backgroundColor: "#f1f5f9", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
                                                 <Text style={{ color: "#94a3b8", fontSize: 10 }}>Submitted</Text>
                                                 <Text style={{ color: "#0f172a", fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
-                                                    {new Date(report.timestamp).toLocaleTimeString()}
+                                                    {formatPST(report.timestamp)}
                                                 </Text>
                                             </View>
                                         </View>
@@ -472,17 +475,16 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                                                 borderWidth: 1,
                                                 borderColor: "#ef4444",
                                             }}
-                                            onPress={() => {
+                                            onPress={async () => {
                                                 setSelectedReport(report);
                                                 setRejectReason("");
-                                                Alert.alert(
+                                                const result = await dialogs.confirm(
                                                     "Dismiss Report?",
-                                                    `Are you sure you want to dismiss this report from ${report.reporter_name}?`,
-                                                    [
-                                                        { text: "Cancel", onPress: () => {} },
-                                                        { text: "Dismiss", onPress: handleReject, style: "destructive" },
-                                                    ]
+                                                    `Are you sure you want to dismiss this report from ${report.reporter_name}?`
                                                 );
+                                                if (result.isConfirmed) {
+                                                    handleReject();
+                                                }
                                             }}
                                         >
                                             <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
@@ -566,7 +568,7 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                                                 <View>
                                                     <Text style={{ color: "#94a3b8", fontSize: 11 }}>Submitted</Text>
                                                     <Text style={{ color: "#0f172a", fontFamily: "Poppins_600SemiBold" }}>
-                                                        {new Date(selectedReport.timestamp).toLocaleTimeString()}
+                                                        {formatPST(selectedReport.timestamp)}
                                                     </Text>
                                                 </View>
                                             </View>
@@ -812,20 +814,15 @@ const VerifyAlertsPage = ({ onNavigate, onLogout, userRole = "lgu", currentUser 
                                                 borderWidth: 1,
                                                 borderColor: "#ef4444",
                                             }}
-                                            onPress={() => {
+                                            onPress={async () => {
                                                 setShowVerifyModal(false);
-                                                Alert.alert(
+                                                const result = await dialogs.confirm(
                                                     "Dismiss Report?",
-                                                    "This report will be removed from the verification queue and marked as dismissed.",
-                                                    [
-                                                        { text: "Cancel", onPress: () => {} },
-                                                        {
-                                                            text: "Dismiss",
-                                                            onPress: handleReject,
-                                                            style: "destructive",
-                                                        },
-                                                    ]
+                                                    "This report will be removed from the verification queue and marked as dismissed."
                                                 );
+                                                if (result.isConfirmed) {
+                                                    handleReject();
+                                                }
                                             }}
                                             disabled={submittingReject}
                                         >

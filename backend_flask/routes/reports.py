@@ -4,6 +4,7 @@ from flask import Blueprint, request, jsonify, send_from_directory, current_app
 from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
 from utils.db import get_db
+from utils.timezone_utils import get_pst_now, format_pst
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,14 @@ reports_bp = Blueprint('reports', __name__)
 def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in current_app.config['ALLOWED_EXTENSIONS']
+
+def _emit_report_update():
+    """Broadcast report changes to all WebSocket clients."""
+    try:
+        from app import socketio
+        socketio.emit("report_update", {"message": "refresh"}, namespace="/")
+    except Exception:
+        pass
 
 @reports_bp.route('/uploads/<name>')
 def download_file(name):
@@ -80,14 +89,17 @@ def create_report():
     
     query = f"""
         INSERT INTO reports ({', '.join(columns)})
-        VALUES ({', '.join(placeholders)}, NOW())
+        VALUES ({', '.join(placeholders)}, %s)
     """
     
+    values.append(format_pst(get_pst_now()))
     cursor.execute(query, values)
     
     db.commit()
     report_id = cursor.lastrowid
     cursor.close()
+    
+    _emit_report_update()
     
     return jsonify({"message": "Report submitted successfully", "id": report_id, "image_url": image_url}), 201
 
@@ -143,6 +155,9 @@ def update_report_status(report_id):
             # Non-critical — log but don't fail the report status update
             current_app.logger.warning(f"Auto-escalation check failed: {e}")
     
+    
+    _emit_report_update()
+
     return jsonify({"message": "Report status updated"}), 200
 
 
@@ -174,9 +189,9 @@ def get_pending_reports_with_sensor_data():
         # Format datetimes for JSON serialization
         for r in reports:
             if r['timestamp']:
-                r['timestamp'] = r['timestamp'].isoformat() if isinstance(r['timestamp'], datetime) else str(r['timestamp'])
+                r['timestamp'] = format_pst(r['timestamp'])
             if r['verified_at']:
-                r['verified_at'] = r['verified_at'].isoformat() if isinstance(r['verified_at'], datetime) else str(r['verified_at'])
+                r['verified_at'] = format_pst(r['verified_at'])
 
         # Fetch latest sensor data for comparison context
         cursor.execute("""
@@ -187,7 +202,7 @@ def get_pending_reports_with_sensor_data():
         latest_sensor = cursor.fetchone()
         
         if latest_sensor and latest_sensor['created_at']:
-            latest_sensor['created_at'] = latest_sensor['created_at'].isoformat() if isinstance(latest_sensor['created_at'], datetime) else str(latest_sensor['created_at'])
+            latest_sensor['created_at'] = format_pst(latest_sensor['created_at'])
             
         cursor.close()
         
@@ -255,8 +270,8 @@ def verify_report(report_id):
         return jsonify({"error": "Only pending reports can be verified"}), 400
     
     # Update with verification info
-    from datetime import datetime
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now_pst = get_pst_now()
+    now_str = format_pst(now_pst)
     
     print(f"[VERIFY] UPDATE params: status=verified verified_by={verified_by!r} flood_level={flood_level!r} recommendations={recommendations!r} report_status={report_status!r} report_id={report_id}", flush=True)
 
@@ -269,7 +284,7 @@ def verify_report(report_id):
             recommendations = %s,
             report_status = %s
         WHERE id = %s
-    """, (verified_by, now, flood_level, recommendations, report_status, report_id))
+    """, (verified_by, now_str, flood_level, recommendations, report_status, report_id))
 
     db.commit()
     print(f"[VERIFY] UPDATE committed, rowcount={cursor.rowcount}", flush=True)
@@ -294,12 +309,13 @@ def verify_report(report_id):
 
             cursor.execute("""
                 INSERT INTO alerts (title, description, level, barangay, status, timestamp, recommended_action, incident_status, source)
-                VALUES (%s, %s, %s, %s, 'active', NOW(), %s, %s, 'report')
+                VALUES (%s, %s, %s, %s, 'active', %s, %s, %s, 'report')
             """, (
                 f"Verified: {report['type']} at {report['location']}",
                 f"Verified by LGU Official ({verified_by})\nUser Report: {report['description']}\nFlood Level: {flood_level}",
                 alert_level,
                 report['location'],
+                now_str,
                 recommendations or '',
                 report_status or 'Active'
             ))
@@ -338,10 +354,12 @@ def verify_report(report_id):
         "message": "Report verified and broadcast as official alert",
         "report_id": report_id,
         "verified_by": verified_by,
-        "verified_at": now
+        "verified_at": now_str
     }
     if alert_creation_warning:
         response_body["alert_warning"] = f"Report saved but alert broadcast failed: {alert_creation_warning}"
+
+    _emit_report_update()
 
     return jsonify(response_body), 200
 
@@ -381,8 +399,7 @@ def reject_report(report_id):
         # Column doesn't exist yet, continue without email
         pass
     
-    from datetime import datetime
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = format_pst(get_pst_now())
     
     # Update with rejection info
     cursor.execute("""
@@ -392,7 +409,7 @@ def reject_report(report_id):
             verified_at = %s,
             rejection_reason = %s
         WHERE id = %s
-    """, (rejected_by, now, rejection_reason or "False alarm/Duplicate", report_id))
+    """, (rejected_by, now_str, rejection_reason or "False alarm/Duplicate", report_id))
     
     db.commit()
     cursor.close()
@@ -411,12 +428,14 @@ def reject_report(report_id):
         except Exception as e:
             logger.error("Failed to send dismissal notification: %s", e)
     
+    _emit_report_update()
+
     return jsonify({
         "message": "Report rejected and dismissed",
         "report_id": report_id,
         "rejected_by": rejected_by,
         "rejection_reason": rejection_reason or "False alarm/Duplicate",
-        "dismissed_at": now
+        "dismissed_at": now_str
     }), 200
 
 
@@ -438,16 +457,16 @@ def get_daily_summary():
             MAX(flood_level) as peak_level,
             SUM(CASE WHEN status IN ('ALARM', 'CRITICAL') THEN 1 ELSE 0 END) as critical_readings
         FROM iot_readings
-        WHERE DATE(created_at) = CURDATE()
-    """)
+        WHERE DATE(created_at) = DATE(%s)
+    """, (get_pst_now().strftime('%Y-%m-%d'),))
     stats = cursor.fetchone() or {"total_readings": 124, "avg_level": 12.4, "peak_level": 45.2, "critical_readings": 2}
     
     # 2. Total Alerts for Today
-    cursor.execute("SELECT COUNT(*) as alert_count FROM alerts WHERE DATE(timestamp) = CURDATE()")
+    cursor.execute("SELECT COUNT(*) as alert_count FROM alerts WHERE DATE(timestamp) = DATE(%s)", (get_pst_now().strftime('%Y-%m-%d'),))
     alerts = cursor.fetchone() or {"alert_count": 4}
     
     # 3. Community Reports for Today
-    cursor.execute("SELECT COUNT(*) as report_count FROM reports WHERE DATE(timestamp) = CURDATE()")
+    cursor.execute("SELECT COUNT(*) as report_count FROM reports WHERE DATE(timestamp) = DATE(%s)", (get_pst_now().strftime('%Y-%m-%d'),))
     reports = cursor.fetchone() or {"report_count": 8}
 
     # 4. Sensor Network Status
@@ -460,8 +479,8 @@ def get_daily_summary():
         FROM sensors s
         JOIN iot_readings r ON s.id = r.sensor_id
         WHERE s.status = 'active'
-        AND r.created_at >= DATE_SUB(NOW(), INTERVAL 5 SECOND)
-    """)
+        AND r.created_at >= DATE_SUB(%s, INTERVAL 5 SECOND)
+    """, (format_pst(get_pst_now()),))
     active_row = cursor.fetchone()
     active_sensors = active_row['active'] if active_row else 0
     

@@ -3,6 +3,7 @@ import json
 from flask import Blueprint, request, jsonify, Response, stream_with_context
 from utils.db import get_db
 from datetime import datetime
+from utils.timezone_utils import get_pst_now, format_pst
 
 iot_bp = Blueprint("iot", __name__)
 
@@ -15,6 +16,14 @@ def _emit_sensor_update(payload: dict):
         print(f"[WS] Broadcast sent for {payload.get('sensor_id')}", flush=True)
     except Exception as _e:
         print(f"[WS] Broadcast failed: {_e}", flush=True)
+
+def _emit_sensor_list_update():
+    """Broadcast sensor list change to all WebSocket clients."""
+    try:
+        from app import socketio
+        socketio.emit("sensor_list_update", {"message": "refresh"}, namespace="/")
+    except Exception:
+        pass
 
 # ── AUTOMATED ALERT STABILITY TRACKER ──────────────────────────────────────────
 # Keeps track of sensors currently in Warning/Critical state to enforce 5s stability
@@ -88,8 +97,8 @@ def sensor_reading():
     longitude = data.get("longitude")
     maps_url = data.get("maps_url")
     
-    # ALWAYS use server local time to avoid timezone mismatch or future-dated poisons
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # ALWAYS use Philippine Standard Time (UTC+8)
+    timestamp = format_pst(get_pst_now())
 
     if flood_level is None:
         return jsonify({"error": "flood_level is required"}), 400
@@ -142,7 +151,7 @@ def sensor_reading():
         # ── AUTOMATED ALERT STABILITY LOGIC ──────────────────────────────────
         trigger_automated = False
         if status in ["WARNING", "CRITICAL"]:
-            now = datetime.now()
+            now = get_pst_now()
             pending = _pending_alerts.get(sensor_id)
             
             if not pending or pending["level"] != status:
@@ -173,7 +182,7 @@ def sensor_reading():
                 action = "Be ready for Evacuation" if status == "WARNING" else "Evacuate now"
                 
                 # Automated Alert Content (STRICT FORMAT)
-                dt_str = datetime.now().strftime("%B %d, %Y - %I:%M %p")
+                dt_str = get_pst_now().strftime("%B %d, %Y - %I:%M %p")
                 headline = f"AUTOMATED FLOOD {status} ALERT"
                 
                 full_description = (
@@ -204,7 +213,7 @@ def sensor_reading():
                         "level": status.lower(),
                         "barangay": sensor_barangay,
                         "recommended_action": action,
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": get_pst_now().isoformat()
                     }, namespace="/")
                 except: pass
 
@@ -267,9 +276,9 @@ def latest_sensor():
     if isinstance(last_update, datetime):
         last_update_dt = last_update
     else:
-        last_update_dt = datetime.now()
+        last_update_dt = get_pst_now()
 
-    age_seconds = (datetime.now() - last_update_dt).total_seconds()
+    age_seconds = (get_pst_now() - last_update_dt).total_seconds()
     is_offline = age_seconds > 5 or row.get("sensor_status") == "inactive"
     row["is_offline"] = is_offline
     row["status"] = calculate_status(row.get("flood_level") or 0, is_offline)
@@ -332,9 +341,9 @@ def sensor_status():
     if isinstance(last_update, datetime):
         last_update_dt = last_update
     else:
-        last_update_dt = datetime.now()
+        last_update_dt = get_pst_now()
 
-    age_seconds = (datetime.now() - last_update_dt).total_seconds()
+    age_seconds = (get_pst_now() - last_update_dt).total_seconds()
 
     # 5 seconds buffer: covers 1s ESP32 interval + network jitter
     # Also force OFFLINE if the sensor has been manually disabled
@@ -384,13 +393,13 @@ def sensor_by_location():
         try:
             created_at_dt = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
         except Exception:
-            created_at_dt = datetime.now()
+            created_at_dt = get_pst_now()
     elif isinstance(created_at, datetime):
         created_at_dt = created_at
     else:
-        created_at_dt = datetime.now()
+        created_at_dt = get_pst_now()
 
-    age_seconds = (datetime.now() - created_at_dt).total_seconds()
+    age_seconds = (get_pst_now() - created_at_dt).total_seconds()
     is_offline = age_seconds > 5
 
     row["is_offline"] = is_offline
@@ -479,9 +488,9 @@ def get_all_sensors_status():
                 # Use sensors.last_update instead of reading timestamp to track connection while OFF
                 last_update_dt = s.get('last_update')
                 if not isinstance(last_update_dt, datetime):
-                    last_update_dt = datetime.now()
+                    last_update_dt = get_pst_now()
                 
-                age_seconds = (datetime.now() - last_update_dt).total_seconds()
+                age_seconds = (get_pst_now() - last_update_dt).total_seconds()
                 s['is_connected'] = age_seconds <= 5
                 
                 if is_disabled:
@@ -578,6 +587,8 @@ def register_sensor():
         db.commit()
         cur.close()
         
+        _emit_sensor_list_update()
+        
         return jsonify({
             "message": "Sensor registered successfully",
             "sensor": {
@@ -654,6 +665,8 @@ def update_sensor(sensor_id):
         db.commit()
         cur.close()
         
+        _emit_sensor_list_update()
+        
         return jsonify({"message": "Sensor updated successfully"}), 200
     except Exception as e:
         db.rollback()
@@ -687,6 +700,9 @@ def toggle_sensor(sensor_id):
         )
         db.commit()
         cur.close()
+
+        _emit_sensor_list_update()
+
         return jsonify({
             "message": f"Sensor {'enabled' if enabled else 'disabled'} successfully",
             "sensor_id": sensor_id,
@@ -720,6 +736,8 @@ def delete_sensor(sensor_id):
         cur.execute("DELETE FROM sensors WHERE id = %s", (sensor_id,))
         db.commit()
         cur.close()
+        
+        _emit_sensor_list_update()
         
         return jsonify({"message": "Sensor deleted successfully"}), 200
     except Exception as e:
@@ -765,9 +783,9 @@ def stream():
                                 "%Y-%m-%d %H:%M:%S"
                             )
                         except Exception:
-                            created_at_dt = datetime.now()
+                            created_at_dt = get_pst_now()
 
-                    age = (datetime.now() - created_at_dt).total_seconds()
+                    age = (get_pst_now() - created_at_dt).total_seconds()
                     is_offline = age > 15 or row.get("sensor_status") == "inactive"
 
                     payload = {

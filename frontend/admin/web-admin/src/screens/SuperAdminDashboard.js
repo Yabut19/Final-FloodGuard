@@ -7,7 +7,8 @@ import RealTimeClock from "../components/RealTimeClock";
 import LiveSensorStatus from "../components/LiveSensorStatus";
 import WelcomeBanner from "../components/WelcomeBanner";
 import { API_BASE_URL } from "../config/api";
-import useSensorSocket from "../utils/useSensorSocket";
+import useDataSync from "../utils/useDataSync";
+import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
 
 const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) => {
     const [stats, setStats] = useState({ active_sensors: 0, active_alerts: 0, registered_users: 0, avg_water_level: 0 });
@@ -28,9 +29,9 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
         return () => { clearInterval(refreshRef.current); };
     }, []);
 
-    // ── Real-time WebSocket: patch matching sensor on each sensor_update event ──
-    useSensorSocket(
-        (reading) => {
+    // ── Real-time Data Synchronization ──
+    useDataSync({
+        onSensorUpdate: (reading) => {
             setLiveSensors(prev => {
                 const updated = prev.map(s =>
                     s.id === reading.sensor_id
@@ -42,21 +43,35 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
                           }
                         : s
                 );
-                setStats(prev => ({
-                    ...prev,
+                setStats(prevStats => ({
+                    ...prevStats,
                     active_sensors: updated.filter(s => s.status !== "OFFLINE").length,
                     avg_water_level: updated.length
                         ? updated.reduce((a, s) => a + (s.waterLevel || 0), 0) / updated.length
-                        : prev.avg_water_level,
+                        : prevStats.avg_water_level,
                 }));
                 return updated;
             });
         },
-        (newThresholds) => {
+        onThresholdUpdate: (newThresholds) => {
             console.log("[SuperAdmin] Thresholds updated:", newThresholds);
             setThresholds(newThresholds);
+        },
+        onUserUpdate: () => {
+            console.log("[SuperAdmin] User list changed, refreshing...");
+            fetchStats();
+        },
+        onAlertUpdate: () => {
+            console.log("[SuperAdmin] Alerts changed, refreshing...");
+            fetchStats();
+            fetchAlerts();
+        },
+        onSensorListUpdate: () => {
+            console.log("[SuperAdmin] Sensor registry changed, refreshing...");
+            fetchSensors();
+            fetchStats();
         }
-    );
+    });
 
     const fetchAll = async () => {
         await Promise.all([fetchStats(), fetchAlerts(), fetchSensors(), fetchThresholds()]);
@@ -140,10 +155,10 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
                         <Text style={styles.dashboardTopSubtitle}>Real-time monitoring and system status</Text>
                     </View>
                     <View style={styles.dashboardTopRight}>
-                        <View style={[styles.dashboardStatusPill, warningSensors > 0 && { backgroundColor: "#fef3c7" }]}>
-                            <View style={[styles.dashboardStatusDot, warningSensors > 0 && { backgroundColor: "#f59e0b" }]} />
-                            <Text style={[styles.dashboardStatusText, warningSensors > 0 && { color: "#92400e" }]}>
-                                {warningSensors > 0 ? `${warningSensors} Sensor${warningSensors > 1 ? "s" : ""} Warning` : `${onlineSensors}/${liveSensors.length} Online`}
+                        <View style={[styles.dashboardStatusPill, { backgroundColor: onlineSensors >= 1 ? "rgba(22, 163, 74, 0.1)" : "rgba(100, 116, 139, 0.1)" }]}>
+                            <View style={[styles.dashboardStatusDot, { backgroundColor: getSystemStatusColor(onlineSensors) }]} />
+                            <Text style={[styles.dashboardStatusText, { color: getSystemStatusColor(onlineSensors) }]}>
+                                {getSystemStatus(onlineSensors)}
                             </Text>
                         </View>
                         <RealTimeClock style={styles.dashboardTopDate} />
@@ -198,7 +213,7 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
                                             <View style={{ flex: 1 }}>
                                                 <Text style={styles.dashboardAlertTitle}>{alert.title || "Alert"}</Text>
                                                 <Text style={styles.dashboardAlertSubtitle}>{alert.description || `Barangay ${alert.barangay || "—"}`}</Text>
-                                                <Text style={styles.dashboardAlertMeta}>{timeAgo(alert.timestamp)}</Text>
+                                                <Text style={styles.dashboardAlertMeta}>{formatPST(alert.timestamp)}</Text>
                                             </View>
                                             <View style={getAlertBadge(alert.level)}>
                                                 <Text style={styles.dashboardAlertBadgeText}>{(alert.level || "ADVISORY").toUpperCase()}</Text>

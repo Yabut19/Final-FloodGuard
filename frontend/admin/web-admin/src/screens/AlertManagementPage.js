@@ -5,6 +5,9 @@ import { styles } from "../styles/globalStyles";
 import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
 import { API_BASE_URL } from "../config/api";
+import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
+import useDataSync from "../utils/useDataSync";
+import dialogs from "../utils/dialogs";
 
 const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const [alertType, setAlertType] = useState("advisory");
@@ -36,10 +39,8 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     // Alert Details Modal State
     const [showAlertDetailsModal, setShowAlertDetailsModal] = useState(false);
     const [selectedAlertForModal, setSelectedAlertForModal] = useState(null);
+    const [onlineSensors, setOnlineSensors] = useState(0);
     
-    // Delete Confirmation Modal State
-    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-    const [alertToDelete, setAlertToDelete] = useState(null);
 
     // Broadcast Card Flip State
     const [isBroadcastFlipped, setIsBroadcastFlipped] = useState(false);
@@ -116,18 +117,33 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     });
 
     useEffect(() => {
+        fetchActiveAlerts();
         fetchPendingReports();
         fetchAllReports();
         fetchAlertHistory();
-        fetchActiveAlerts();
-        const interval = setInterval(() => {
-            fetchPendingReports();
-            fetchAllReports();
-            fetchAlertHistory();
-            fetchActiveAlerts();
-        }, 5000);
+        fetchSystemStatus();
+
+        const interval = setInterval(fetchSystemStatus, 30000);
+
         return () => clearInterval(interval);
     }, []);
+
+    // ── Real-time Data Synchronization ──
+    useDataSync({
+        onAlertUpdate: () => {
+            console.log("[AlertManagement] Alerts changed, refreshing...");
+            fetchActiveAlerts();
+            fetchAlertHistory();
+        },
+        onReportUpdate: () => {
+            console.log("[AlertManagement] Reports changed, refreshing...");
+            fetchPendingReports();
+            fetchAllReports();
+        },
+        onSensorUpdate: (reading) => {
+            // Optional: update status if needed
+        }
+    });
 
     const fetchActiveAlerts = async () => {
         try {
@@ -151,14 +167,14 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             });
             const data = await response.json();
             if (response.ok) {
-                alert(`✅ Alert escalated: ${data.from_level} → ${data.to_level}`);
+                dialogs.success('Escalated', `✅ Alert escalated: ${data.from_level} → ${data.to_level}`);
                 fetchActiveAlerts();
                 fetchAlertHistory();
             } else {
-                alert(data.error || 'Failed to escalate alert.');
+                dialogs.error('Error', data.error || 'Failed to escalate alert.');
             }
         } catch (err) {
-            alert('Network error while escalating.');
+            dialogs.error('Network Error', 'Network error while escalating.');
         } finally {
             setEscalatingId(null);
         }
@@ -167,49 +183,33 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
 
     const handleDeleteAlert = async (alertId, alertTitle) => {
-        console.log("Delete button clicked for alert:", alertId, alertTitle);
-        setAlertToDelete({ id: alertId, title: alertTitle });
-        setShowDeleteConfirm(true);
-    };
-
-    const confirmDeleteAlert = async () => {
-        if (!alertToDelete) return;
+        const result = await dialogs.confirm(
+            "Delete Alert", 
+            `Are you sure you want to delete this alert?<br/><br/><b style="color: #0f172a; font-size: 18px;">${alertTitle}</b>`
+        );
         
-        console.log("Delete confirmed for alert:", alertToDelete.id);
-        setDeletingId(alertToDelete.id);
-        setShowDeleteConfirm(false);
-        
-        try {
-            const deleteUrl = `${API_BASE_URL}/api/alerts/${alertToDelete.id}`;
-            console.log("Sending DELETE request to:", deleteUrl);
-            
-            const response = await fetch(deleteUrl, {
-                method: 'DELETE',
-                headers: {
-                    'Content-Type': 'application/json'
+        if (result.isConfirmed) {
+            setDeletingId(alertId);
+            try {
+                const deleteUrl = `${API_BASE_URL}/api/alerts/${alertId}`;
+                const response = await fetch(deleteUrl, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const responseData = await response.json();
+                if (response.ok) {
+                    dialogs.success('Deleted', 'Alert deleted successfully.');
+                    fetchActiveAlerts();
+                    fetchAlertHistory();
+                } else {
+                    dialogs.error('Error', responseData.error || 'Failed to delete alert.');
                 }
-            });
-            
-            console.log("DELETE response status:", response.status);
-            const responseData = await response.json();
-            console.log("DELETE response data:", responseData);
-            
-            if (response.ok) {
-                console.log("Alert deleted successfully, refreshing data...");
-                alert('✅ Alert deleted successfully.');
-                fetchActiveAlerts();
-                fetchAlertHistory();
-            } else {
-                const errorMessage = responseData.error || 'Failed to delete alert. Status: ' + response.status;
-                console.error("Delete failed:", errorMessage);
-                alert('❌ ' + errorMessage);
+            } catch (err) {
+                dialogs.error('Network Error', 'Network error while deleting: ' + err.message);
+            } finally {
+                setDeletingId(null);
             }
-        } catch (err) {
-            console.error('Error deleting alert:', err);
-            alert('❌ Network error while deleting: ' + err.message);
-        } finally {
-            setDeletingId(null);
-            setAlertToDelete(null);
         }
     };
 
@@ -263,9 +263,21 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             setSensorDataForReport(data);
             setLoadingSensorData(false);
         } catch (error) {
-            console.error("Error fetching sensor data:", error);
             setSensorDataForReport(null);
             setLoadingSensorData(false);
+        }
+    };
+
+    const fetchSystemStatus = async () => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
+            if (res.ok) {
+                const data = await res.json();
+                const online = data.filter(s => !s.is_offline).length;
+                setOnlineSensors(online);
+            }
+        } catch (e) {
+            console.error("Status fetch error:", e);
         }
     };
 
@@ -320,7 +332,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
     const handleBroadcast = async () => {
         if (selectedBarangays.length === 0 || !alertTitle) {
-            alert("Please fill in all fields (Title, Barangays)");
+            dialogs.alert("Validation", "Please fill in all fields (Title, Barangays)", 'warning');
             return;
         }
 
@@ -345,17 +357,16 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             });
 
             if (response.ok) {
-                alert("Alert broadcasted successfully!");
-                setAlertMessage("");
+                dialogs.success("Success", "Alert broadcasted successfully!");
                 setAlertTitle("");
                 setSelectedBarangays([]);
                 fetchAlertHistory(); // Refresh history list
             } else {
-                alert("Failed to broadcast alert.");
+                dialogs.error("Failed", "Failed to broadcast alert.");
             }
         } catch (error) {
             console.error("Error broadcasting alert:", error);
-            alert("An error occurred.");
+            dialogs.error("Error", "An error occurred.");
         } finally {
             setLoading(false);
         }
@@ -397,12 +408,12 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
             if (!response.ok) {
                 const err = await response.json();
-                alert("Error: " + (err.error || "Verification failed"));
+                dialogs.error("Error", (err.error || "Verification failed"));
                 return;
             }
 
             // Auto-broadcast as official alert (already done by backend)
-            alert("✅ Report verified and broadcasted as official alert!");
+            dialogs.success("Verified", "✅ Report verified and broadcasted as official alert!");
             setVerifications(verifications.filter((v) => v.id !== id));
             setShowReportDetailsModal(false);
             setRecommendedAction("");
@@ -411,7 +422,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             fetchActiveAlerts();
         } catch (error) {
             console.error("Error verifying report:", error);
-            alert("Error verifying report");
+            dialogs.error("Error", "Error verifying report");
         }
     };
 
@@ -427,14 +438,14 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 })
             });
 
-            alert("✅ Report dismissed. Notification sent to reporter.");
+            dialogs.success("Dismissed", "✅ Report dismissed. Notification sent to reporter.");
             setVerifications(verifications.filter((v) => v.id !== id));
             setShowReportDetailsModal(false);
             fetchPendingReports();
             fetchAllReports();
         } catch (error) {
             console.error("Error rejecting report:", error);
-            alert("Error dismissing report");
+            dialogs.error("Error", "Error dismissing report");
         }
     };
 
@@ -616,7 +627,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                                         <Text style={[styles.ccAlertLevelText, { color: meta.color }]}>{meta.label}</Text>
                                                     </View>
                                                     <Text style={{ fontSize: 12, color: '#94a3b8' }}>
-                                                        {a.timestamp ? new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                                                        {a.timestamp ? formatPST(a.timestamp) : '--:--'}
                                                     </Text>
                                                 </View>
 
@@ -689,7 +700,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                 >
                                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
                                         <Text style={{ fontSize: 12, color: '#3b82f6', fontFamily: "Poppins_700Bold" }}>{item.type.toUpperCase()}</Text>
-                                        <Text style={{ fontSize: 11, color: '#94a3b8' }}>{new Date(item.timestamp).toLocaleTimeString()}</Text>
+                                        <Text style={{ fontSize: 11, color: '#94a3b8' }}>{formatPST(item.timestamp)}</Text>
                                     </View>
                                     <Text style={{ fontSize: 14, fontFamily: "Poppins_700Bold", color: '#1e293b' }}>{item.location}</Text>
                                     <Text style={{ fontSize: 13, color: '#64748b', marginTop: 4, fontStyle: 'italic' }}>"{item.description}"</Text>
@@ -815,7 +826,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                             <Text style={{ fontSize: 11, fontFamily: "Poppins_700Bold", color: item.level === 'critical' ? '#dc2626' : item.level === 'warning' ? '#f97316' : item.level === 'evacuation' ? '#1e3a8a' : '#3b82f6' }}>
                                                 {item.level.toUpperCase()}
                                             </Text>
-                                            <Text style={{ fontSize: 11, color: '#94a3b8' }}>{new Date(item.timestamp).toLocaleDateString()}</Text>
+                                            <Text style={{ fontSize: 11, color: '#94a3b8' }}>{formatPST(item.timestamp)}</Text>
                                         </View>
                                         <Text style={{ fontSize: 14, fontFamily: "Poppins_600SemiBold", color: '#1e293b' }}>{item.title}</Text>
                                         <Text style={{ fontSize: 12, color: '#64748b', marginTop: 2 }} numberOfLines={2}>{item.description}</Text>
@@ -887,9 +898,11 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                         <Text style={styles.dashboardTopTitle}>Command Center</Text>
                     </View>
                     <View style={styles.dashboardTopRight}>
-                        <View style={styles.dashboardStatusPill}>
-                            <View style={[styles.dashboardStatusDot, { backgroundColor: '#16a34a' }]} />
-                            <Text style={styles.dashboardStatusText}>Mission Ready</Text>
+                        <View style={[styles.dashboardStatusPill, { backgroundColor: onlineSensors >= 1 ? "rgba(22, 163, 74, 0.1)" : "rgba(100, 116, 139, 0.1)" }]}>
+                            <View style={[styles.dashboardStatusDot, { backgroundColor: getSystemStatusColor(onlineSensors) }]} />
+                            <Text style={[styles.dashboardStatusText, { color: getSystemStatusColor(onlineSensors) }]}>
+                                {getSystemStatus(onlineSensors)}
+                            </Text>
                         </View>
                         <RealTimeClock style={styles.dashboardTopDate} />
                     </View>
@@ -925,7 +938,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                         <View>
                                             <Text style={{ fontSize: 17, fontFamily: "Poppins_700Bold", color: '#0f172a' }}>Review Citizen Report</Text>
                                             <Text style={{ fontSize: 12, color: '#94a3b8', fontFamily: "Poppins_400Regular" }}>
-                                                Submitted {new Date(selectedReportForModal.timestamp).toLocaleString()}
+                                                Submitted {formatPST(selectedReportForModal.timestamp)}
                                             </Text>
                                         </View>
                                     </View>
@@ -984,7 +997,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                                                         <Feather name="clock" size={12} color="#64748b" />
                                                         <Text style={{ fontSize: 12, fontFamily: "Poppins_600SemiBold", color: '#1e293b' }}>
-                                                            {new Date(selectedReportForModal.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                            {formatPST(selectedReportForModal.timestamp)}
                                                         </Text>
                                                     </View>
                                                 </View>
@@ -1240,7 +1253,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
                                             <Text style={{ fontSize: 13, color: '#64748b', fontFamily: "Poppins_600SemiBold" }}>Timestamp</Text>
                                             <Text style={{ fontSize: 13, color: '#1e293b', fontFamily: "Poppins_700Bold" }}>
-                                                {selectedAlertForModal.timestamp ? new Date(selectedAlertForModal.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'N/A'}
+                                                {selectedAlertForModal.timestamp ? formatPST(selectedAlertForModal.timestamp) : 'N/A'}
                                             </Text>
                                         </View>
 
@@ -1327,39 +1340,6 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 </View>
             </Modal>
 
-            {/* Delete Confirmation Modal */}
-            <Modal
-                visible={showDeleteConfirm}
-                transparent={true}
-                animationType="fade"
-                onRequestClose={() => setShowDeleteConfirm(false)}
-            >
-                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
-                    <View style={{ backgroundColor: '#ffffff', borderRadius: 16, padding: 24, maxWidth: 400, width: '90%', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 12 }}>
-                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: '#1e293b', marginBottom: 12 }}>Delete Alert</Text>
-                        <Text style={{ fontSize: 14, color: '#64748b', marginBottom: 24 }}>
-                            Are you sure you want to delete this alert?{'\n\n'}
-                            <Text style={{ fontFamily: "Poppins_600SemiBold", color: '#1e293b' }}>{alertToDelete?.title}</Text>
-                        </Text>
-                        
-                        <View style={{ flexDirection: 'row', gap: 12 }}>
-                            <TouchableOpacity
-                                style={{ flex: 1, paddingVertical: 12, backgroundColor: '#f1f5f9', borderRadius: 8, alignItems: 'center' }}
-                                onPress={() => setShowDeleteConfirm(false)}
-                            >
-                                <Text style={{ fontSize: 14, fontFamily: "Poppins_600SemiBold", color: '#64748b' }}>Cancel</Text>
-                            </TouchableOpacity>
-                            
-                            <TouchableOpacity
-                                style={{ flex: 1, paddingVertical: 12, backgroundColor: '#dc2626', borderRadius: 8, alignItems: 'center' }}
-                                onPress={() => confirmDeleteAlert()}
-                            >
-                                <Text style={{ fontSize: 14, fontFamily: "Poppins_600SemiBold", color: '#ffffff' }}>Delete</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
         </View>
     );
 };

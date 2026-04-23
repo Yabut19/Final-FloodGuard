@@ -7,7 +7,8 @@ import RealTimeClock from "../components/RealTimeClock";
 import LiveSensorStatus from "../components/LiveSensorStatus";
 import WelcomeBanner from "../components/WelcomeBanner";
 import { API_BASE_URL } from "../config/api";
-import useSensorSocket from "../utils/useSensorSocket";
+import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
+import useDataSync from "../utils/useDataSync";
 
 const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
     const [stats, setStats] = useState({ active_sensors: 0, active_alerts: 0, registered_users: 0, avg_water_level: 0 });
@@ -29,10 +30,10 @@ const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
         return () => { clearInterval(refreshRef.current); };
     }, []);
 
-    // ── Real-time WebSocket: patch matching sensor on each sensor_update event ──
-    const wsConnected = useSensorSocket(
-        (reading) => {
-            console.log("[Dashboard] Event received:", reading);
+    // ── Real-time Data Synchronization ──
+    const socket = useDataSync({
+        onSensorUpdate: (reading) => {
+            console.log("[Dashboard] Reading received:", reading);
             setMsgCount(c => c + 1);
             setLiveSensors(prev => {
                 const updated = prev.map(s =>
@@ -46,21 +47,41 @@ const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
                         : s
                 );
                 // Recompute stats from updated list
-                setStats(prev => ({
-                    ...prev,
+                setStats(prevStats => ({
+                    ...prevStats,
                     active_sensors: updated.filter(s => s.status !== "OFFLINE").length,
                     avg_water_level: updated.length
                         ? updated.reduce((a, s) => a + (s.waterLevel || 0), 0) / updated.length
-                        : prev.avg_water_level,
+                        : prevStats.avg_water_level,
                 }));
                 return updated;
             });
         },
-        (newThresholds) => {
+        onThresholdUpdate: (newThresholds) => {
             console.log("[Dashboard] Thresholds updated:", newThresholds);
             setThresholds(newThresholds);
+        },
+        onUserUpdate: () => {
+            console.log("[Dashboard] User list changed, refreshing...");
+            fetchStats();
+        },
+        onAlertUpdate: () => {
+            console.log("[Dashboard] Alerts changed, refreshing...");
+            fetchStats();
+            fetchAlerts();
+        },
+        onReportUpdate: () => {
+            console.log("[Dashboard] Community reports changed, refreshing...");
+            fetchStats();
+        },
+        onSensorListUpdate: () => {
+            console.log("[Dashboard] Sensor registry changed, refreshing...");
+            fetchSensors();
+            fetchStats();
         }
-    );
+    });
+
+    const wsConnected = !!socket;
 
     const fetchAll = async () => {
         await Promise.all([fetchStats(), fetchAlerts(), fetchSensors(), fetchThresholds()]);
@@ -114,14 +135,6 @@ const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
         return styles.dashboardAlertBadgeAdvisory;
     };
 
-    const timeAgo = (timestamp) => {
-        if (!timestamp) return "—";
-        const diff = Math.floor((Date.now() - new Date(timestamp)) / 1000);
-        if (diff < 60) return `${diff}s ago`;
-        if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-        if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-        return `${Math.floor(diff / 86400)}d ago`;
-    };
 
     const onlineSensors = liveSensors.filter(s => s.status !== "OFFLINE").length;
 
@@ -143,15 +156,11 @@ const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
                         <Text style={styles.dashboardTopSubtitle}>Real-time monitoring and system status</Text>
                     </View>
                     <View style={styles.dashboardTopRight}>
-                        <View style={styles.dashboardStatusPill}>
-                            <View style={[styles.dashboardStatusDot, { backgroundColor: wsConnected ? "#22c55e" : "#f59e0b" }]} />
-                            <Text style={styles.dashboardStatusText}>{onlineSensors}/{liveSensors.length} Sensors Online</Text>
-                        </View>
-                        <View style={[styles.dashboardStatusPill, { marginLeft: 8 }]}>
-                             <Feather name={wsConnected ? "link" : "link-2"} size={12} color={wsConnected ? "#22c55e" : "#f59e0b"} />
-                             <Text style={[styles.dashboardStatusText, { marginLeft: 4 }]}>
-                                {wsConnected ? `Live (${msgCount})` : "Polling"}
-                             </Text>
+                        <View style={[styles.dashboardStatusPill, { backgroundColor: onlineSensors >= 1 ? "rgba(34, 197, 94, 0.1)" : "rgba(100, 116, 139, 0.1)" }]}>
+                            <View style={[styles.dashboardStatusDot, { backgroundColor: getSystemStatusColor(onlineSensors) }]} />
+                            <Text style={[styles.dashboardStatusText, { color: getSystemStatusColor(onlineSensors) }]}>
+                                {getSystemStatus(onlineSensors)}
+                            </Text>
                         </View>
                         <RealTimeClock style={styles.dashboardTopDate} />
                     </View>
@@ -205,7 +214,7 @@ const AdminDashboard = ({ onNavigate, onLogout, userRole }) => {
                                             <View style={{ flex: 1 }}>
                                                 <Text style={styles.dashboardAlertTitle}>{alert.title || "Alert"}</Text>
                                                 <Text style={styles.dashboardAlertSubtitle}>{alert.description || `Barangay ${alert.barangay || "—"}`}</Text>
-                                                <Text style={styles.dashboardAlertMeta}>{timeAgo(alert.timestamp)}</Text>
+                                                <Text style={styles.dashboardAlertMeta}>{formatPST(alert.timestamp)}</Text>
                                             </View>
                                             <View style={getAlertBadge(alert.level)}>
                                                 <Text style={styles.dashboardAlertBadgeText}>{(alert.level || "ADVISORY").toUpperCase()}</Text>

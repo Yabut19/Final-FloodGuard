@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify
 from utils.db import get_db
+from utils.timezone_utils import get_pst_now, format_pst
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
@@ -14,8 +15,8 @@ def get_stats():
         FROM sensors s
         JOIN iot_readings r ON s.id = r.sensor_id
         WHERE s.status = 'active'
-        AND r.created_at >= DATE_SUB(NOW(), INTERVAL 5 SECOND)
-    """)
+        AND r.created_at >= DATE_SUB(%s, INTERVAL 5 SECOND)
+    """, (format_pst(get_pst_now()),))
     active_sensors = cursor.fetchone()['count']
     
     # Active Alerts

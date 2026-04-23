@@ -6,6 +6,8 @@ import { styles } from "../styles/globalStyles";
 import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
 import { API_BASE_URL } from "../config/api";
+import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
+import useDataSync from "../utils/useDataSync";
 
 const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const isSuperAdmin = userRole === "superadmin";
@@ -24,6 +26,7 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const [communityReports, setCommunityReports] = useState([]);
     const [sensorsList, setSensorsList] = useState([{ id: "All Sensors", name: "All Sensors" }]);
     const [isLoading, setIsLoading] = useState(true);
+    const [onlineSensors, setOnlineSensors] = useState(0);
     const [hoveredTab, setHoveredTab] = useState(null);
     const [hoveredItem, setHoveredItem] = useState(null);
     const [selectedImage, setSelectedImage] = useState(null);
@@ -76,8 +79,76 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     };
 
     useEffect(() => {
+        const fetchSystemStatus = async () => {
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const online = data.filter(s => !s.is_offline).length;
+                    setOnlineSensors(online);
+                }
+            } catch (e) {
+                console.error("Status fetch error:", e);
+            }
+        };
+
+        fetchSystemStatus();
+        const interval = setInterval(fetchSystemStatus, 30000);
+        return () => clearInterval(interval);
+    }, []);
+
+    useEffect(() => {
         fetchData();
     }, [selectedSensor.id]);
+
+    // ── Real-time Data Synchronization ──
+    useDataSync({
+        onSensorUpdate: (reading) => {
+            // 1. Update analytics counts
+            setAnalytics(prev => prev.map(item => {
+                if (item.label === "Collected Data") return { ...item, value: (parseInt(item.value) || 0) + 1 };
+                if (item.label === "Peak Flood (cm)") {
+                    const currentVal = parseFloat(item.value) || 0;
+                    const newVal = parseFloat(reading.flood_level) || 0;
+                    return { ...item, value: Math.max(currentVal, newVal) };
+                }
+                return item;
+            }));
+
+            // 2. Prepend to history table if matches filter
+            if (selectedSensor.id === "All Sensors" || selectedSensor.id === reading.sensor_id) {
+                const sensorObj = sensorsList.find(s => s.id === reading.sensor_id) || { name: reading.sensor_id, location: "General Area" };
+                const formatted = formatPST(reading.timestamp || Date.now());
+                const [datePart, timePart] = formatted.split(' • ');
+                const newRow = {
+                    id: Date.now(), // temporary ID
+                    time: timePart,
+                    date: datePart,
+                    level: `${reading.flood_level} cm`,
+                    sensor: sensorObj.name,
+                    location: sensorObj.barangay || "General Area",
+                    status: (reading.status || "Normal").charAt(0).toUpperCase() + (reading.status || "Normal").slice(1).toLowerCase()
+                };
+                setFloodHistory(prev => [newRow, ...prev].slice(0, 50));
+            }
+        },
+        onReportUpdate: () => {
+            console.log("[DataReports] Reports updated, refreshing list...");
+            fetch(`${API_BASE_URL}/api/reports/`)
+                .then(res => res.json())
+                .then(data => {
+                    setCommunityReports(data);
+                    setAnalytics(prev => prev.map(item => 
+                        item.label === "Reports" ? { ...item, value: data.length } : item
+                    ));
+                })
+                .catch(err => console.error("Live reports refresh failed:", err));
+        },
+        onSensorListUpdate: () => {
+            console.log("[DataReports] Sensor list updated, refreshing...");
+            fetchData();
+        }
+    });
 
     const handleDownloadPDF = (report) => {
         const isVerified = report.status?.toLowerCase() === "verified";
@@ -94,8 +165,8 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             second: '2-digit',
             hour12: true
         };
-        const formattedTime = new Date(report.timestamp).toLocaleString('en-PH', timeOptions);
-        const generationTime = new Date().toLocaleString('en-PH', timeOptions);
+        const formattedTime = formatPST(report.timestamp);
+        const generationTime = formatPST(new Date());
 
         const printWindow = window.open('', '_blank');
         printWindow.document.write(`
@@ -246,9 +317,11 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                         <Text style={styles.dashboardTopSubtitle}>Archive, analysis, and historical flood records</Text>
                     </View>
                     <View style={styles.dashboardTopRight}>
-                        <View style={styles.dashboardStatusPill}>
-                            <View style={styles.dashboardStatusDot} />
-                            <Text style={styles.dashboardStatusText}>System Synced</Text>
+                        <View style={[styles.dashboardStatusPill, { backgroundColor: onlineSensors >= 1 ? "rgba(22, 163, 74, 0.1)" : "rgba(100, 116, 139, 0.1)" }]}>
+                            <View style={[styles.dashboardStatusDot, { backgroundColor: getSystemStatusColor(onlineSensors) }]} />
+                            <Text style={[styles.dashboardStatusText, { color: getSystemStatusColor(onlineSensors) }]}>
+                                {getSystemStatus(onlineSensors)}
+                            </Text>
                         </View>
                         <RealTimeClock style={styles.dashboardTopDate} />
                     </View>
@@ -434,7 +507,7 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                             <View style={pg.reportCardHeader}>
                                                 <View>
                                                     <Text style={pg.reportReporter}>{report.reporter_name}</Text>
-                                                    <Text style={pg.reportTime}>{new Date(report.timestamp).toLocaleString('en-PH', { hour12: true })}</Text>
+                                                    <Text style={pg.reportTime}>{formatPST(report.timestamp)}</Text>
                                                 </View>
                                                 <View style={[pg.statusBadge, {
                                                     backgroundColor: isVerified ? "#dcfce7" : isPending ? "#fff7ed" : "#f1f5f9",

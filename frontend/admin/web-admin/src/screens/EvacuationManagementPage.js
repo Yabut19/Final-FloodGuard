@@ -5,7 +5,10 @@ import { LinearGradient } from "expo-linear-gradient";
 import { styles } from "../styles/globalStyles";
 import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
+import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
 import { API_BASE_URL } from "../config/api";
+import useDataSync from "../utils/useDataSync";
+import dialogs from "../utils/dialogs";
 
 const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const [centers, setCenters] = useState([]);
@@ -17,6 +20,7 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
     const [showEditModal, setShowEditModal] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [editingCenter, setEditingCenter] = useState(null);
+    const [onlineSensors, setOnlineSensors] = useState(0);
 
     const [form, setForm] = useState({
         name: "",
@@ -47,6 +51,33 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        const fetchSystemStatus = async () => {
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const online = data.filter(s => !s.is_offline).length;
+                    setOnlineSensors(online);
+                }
+            } catch (e) {
+                console.error("Status fetch error:", e);
+            }
+        };
+
+        fetchSystemStatus();
+        const interval = setInterval(fetchSystemStatus, 30000);
+        return () => clearInterval(interval);
+    }, []);
+
+    // ── Real-time Data Synchronization ──
+    useDataSync({
+        onEvacuationUpdate: () => {
+            console.log("[EvacuationManagement] Centers updated, refreshing list...");
+            fetchCenters();
+        }
+    });
 
     useEffect(() => {
         fetchCenters();
@@ -157,7 +188,7 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
 
     const handleCreateCenter = async () => {
         if (!form.name || !form.location || !form.lat || !form.lng) {
-            alert("Please fill in Name, Location, Latitude, and Longitude");
+            dialogs.alert("Validation", "Please fill in Name, Location, Latitude, and Longitude", 'warning');
             return;
         }
 
@@ -175,7 +206,7 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
             });
 
             if (response.ok) {
-                alert("Evacuation center added successfully");
+                dialogs.success("Success", "Evacuation center added successfully");
                 setShowAddModal(false);
                 setCurrentStep(1);
                 setForm({ name: "", location: "", lat: "", lng: "", capacity: "0", phone: "911", status: "open" });
@@ -183,10 +214,10 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
                 fetchCenters();
             } else {
                 const data = await response.json();
-                alert(data.error || "Failed to add center");
+                dialogs.error("Error", data.error || "Failed to add center");
             }
         } catch (error) {
-            alert("Network error adding center");
+            dialogs.error("Error", "Network error adding center");
         } finally {
             setIsSubmitting(false);
         }
@@ -208,34 +239,35 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
             });
 
             if (response.ok) {
-                alert("Evacuation center updated successfully");
+                dialogs.success("Updated", "Evacuation center updated successfully");
                 setShowEditModal(false);
                 fetchCenters();
             } else {
                 const data = await response.json();
-                alert(data.error || "Failed to update center");
+                dialogs.error("Error", data.error || "Failed to update center");
             }
         } catch (error) {
-            alert("Network error updating center");
+            dialogs.error("Error", "Network error updating center");
         } finally {
             setIsSubmitting(false);
         }
     };
 
     const handleDeleteCenter = async (id) => {
-        if (confirm("Are you sure you want to delete this evacuation center?")) {
+        const result = await dialogs.confirm("Delete Center", "Are you sure you want to delete this evacuation center?");
+        if (result.isConfirmed) {
             try {
                 const response = await fetch(`${API_BASE_URL}/api/evacuation-centers/${id}`, {
                     method: "DELETE"
                 });
                 if (response.ok) {
-                    alert("Center deleted successfully");
+                    dialogs.success("Deleted", "Center deleted successfully");
                     fetchCenters();
                 } else {
-                    alert("Failed to delete center");
+                    dialogs.error("Error", "Failed to delete center");
                 }
             } catch (error) {
-                alert("Network error deleting center");
+                dialogs.error("Error", "Network error deleting center");
             }
         }
     };
@@ -284,9 +316,11 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
                         </Text>
                     </View>
                     <View style={styles.dashboardTopRight}>
-                        <View style={styles.dashboardStatusPill}>
-                            <View style={styles.dashboardStatusDot} />
-                            <Text style={styles.dashboardStatusText}>System Online</Text>
+                        <View style={[styles.dashboardStatusPill, { backgroundColor: onlineSensors >= 1 ? "rgba(22, 163, 74, 0.1)" : "rgba(100, 116, 139, 0.1)" }]}>
+                            <View style={[styles.dashboardStatusDot, { backgroundColor: getSystemStatusColor(onlineSensors) }]} />
+                            <Text style={[styles.dashboardStatusText, { color: getSystemStatusColor(onlineSensors) }]}>
+                                {getSystemStatus(onlineSensors)}
+                            </Text>
                         </View>
                         <RealTimeClock style={styles.dashboardTopDate} />
                     </View>

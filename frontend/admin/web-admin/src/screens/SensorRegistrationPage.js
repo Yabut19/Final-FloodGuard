@@ -7,9 +7,11 @@ import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
 import { API_BASE_URL } from "../config/api";
 import useSensorSocket from "../utils/useSensorSocket";
+import dialogs from "../utils/dialogs";
+import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
 
 const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
-    const isSuperAdmin = userRole === "superadmin";
+    const isSuperAdmin = userRole === "superadmin" || userRole === "lgu";
     const [activeTab, setActiveTab] = useState(isSuperAdmin ? "sensors" : "map"); // "map" | "sensors"
     const [sensors, setSensors] = useState([]);
     const [liveSensors, setLiveSensors] = useState([]);
@@ -18,10 +20,6 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const [showRegistrationModal, setShowRegistrationModal] = useState(false);
     const [showStatusModal, setShowStatusModal] = useState(false);
     const [selectedSensorHealth, setSelectedSensorHealth] = useState(null);
-    const [showSuccessModal, setShowSuccessModal] = useState(false);
-    const [successMessage, setSuccessMessage] = useState("");
-    const [errorMessage, setErrorMessage] = useState("");
-    const [showErrorModal, setShowErrorModal] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [statusFilter, setStatusFilter] = useState("All Status");
     const [showStatusDropdown, setShowStatusDropdown] = useState(false);
@@ -211,17 +209,16 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
     const resetForm = () => {
         setFormData({ id: "", name: "", barangay: "", description: "", lat: "", lng: "", status: "active", battery_level: "100", signal_strength: "strong" });
-        setErrorMessage("");
     };
 
     const handleRegisterSensor = async () => {
-        if (!formData.id.trim()) return showErr("Sensor ID is required");
-        if (!formData.name.trim()) return showErr("Sensor Name is required");
-        if (!formData.barangay.trim()) return showErr("Barangay is required");
-        if (!formData.lat || !formData.lng) return showErr("Latitude and Longitude are required");
+        if (!formData.id.trim()) return dialogs.error("Validation Error", "Sensor ID is required");
+        if (!formData.name.trim()) return dialogs.error("Validation Error", "Sensor Name is required");
+        if (!formData.barangay.trim()) return dialogs.error("Validation Error", "Barangay is required");
+        if (!formData.lat || !formData.lng) return dialogs.error("Validation Error", "Latitude and Longitude are required");
         const lat = parseFloat(formData.lat), lng = parseFloat(formData.lng);
-        if (isNaN(lat) || isNaN(lng)) return showErr("Coordinates must be valid numbers");
-        if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return showErr("Invalid coordinates");
+        if (isNaN(lat) || isNaN(lng)) return dialogs.error("Validation Error", "Coordinates must be valid numbers");
+        if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return dialogs.error("Validation Error", "Invalid coordinates");
 
         setLoading(true);
         try {
@@ -238,39 +235,37 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             const data = await res.json();
             if (res.ok) {
                 setShowRegistrationModal(false);
-                setSuccessMessage(`Sensor "${formData.name}" registered successfully!`);
-                setShowSuccessModal(true);
+                dialogs.success("Success!", `Sensor "${formData.name}" registered successfully!`);
                 resetForm();
                 fetchSensors();
                 fetchHealthData();
             } else {
-                showErr(data.error || "Registration failed");
+                dialogs.error("Error", data.error || "Registration failed");
             }
         } catch (e) {
-            showErr("Network error during registration");
+            dialogs.error("Error", "Network error during registration");
         }
         setLoading(false);
     };
 
     const handleDeleteSensor = async (sensorId) => {
-        if (!window.confirm(`Are you sure you want to delete sensor "${sensorId}"?`)) return;
+        const result = await dialogs.confirm("Delete Sensor", `Are you sure you want to delete sensor "${sensorId}"?`);
+        if (!result.isConfirmed) return;
         try {
             const res = await fetch(`${API_BASE_URL}/api/iot/sensors/${sensorId}`, { method: "DELETE" });
             const data = await res.json();
             if (res.ok) {
-                setSuccessMessage(data.message || "Sensor deleted successfully");
-                setShowSuccessModal(true);
+                dialogs.success("Deleted", data.message || "Sensor deleted successfully");
                 fetchSensors();
                 fetchHealthData();
             } else {
-                showErr(data.error || "Failed to delete sensor");
+                dialogs.error("Error", data.error || "Failed to delete sensor");
             }
         } catch (e) {
-            showErr("Network error while deleting sensor");
+            dialogs.error("Error", "Network error while deleting sensor");
         }
     };
 
-    const showErr = (msg) => { setErrorMessage(msg); setShowErrorModal(true); };
 
     // ── Toggle sensor on/off ──────────────────────────────────────
     const [togglingId, setTogglingId] = useState(null);
@@ -356,10 +351,10 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                         <Text style={styles.dashboardTopSubtitle}>Register, monitor, and manage your sensor network</Text>
                     </View>
                     <View style={styles.dashboardTopRight}>
-                        <View style={styles.dashboardStatusPill}>
-                            <View style={styles.dashboardStatusDot} />
-                            <Text style={styles.dashboardStatusText}>
-                                {onlineSensors}/{totalSensors} Online
+                        <View style={[styles.dashboardStatusPill, { backgroundColor: onlineSensors >= 1 ? "rgba(22, 163, 74, 0.1)" : "rgba(100, 116, 139, 0.1)" }]}>
+                            <View style={[styles.dashboardStatusDot, { backgroundColor: getSystemStatusColor(onlineSensors) }]} />
+                            <Text style={[styles.dashboardStatusText, { color: getSystemStatusColor(onlineSensors) }]}>
+                                {getSystemStatus(onlineSensors)}
                             </Text>
                         </View>
                         <RealTimeClock style={styles.dashboardTopDate} />
@@ -788,7 +783,7 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                             const isOff = sh.live?.is_offline;
                             const reading_st = isOff ? "OFFLINE" : (sh.live?.reading_status || "NORMAL");
                             const st = getStatusBadge(reading_st);
-                            const lastSeen = sh.live?.last_seen ? new Date(sh.live.last_seen).toLocaleString() : "Unknown";
+                            const lastSeen = sh.live?.last_seen ? formatPST(sh.live.last_seen) : "Unknown";
 
                             return (
                                 <>
@@ -868,37 +863,6 @@ const ManageSensorsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 </View>
             </Modal>
 
-            {/* ── Success Modal ────────────────────────────────────────────── */}
-            <Modal visible={showSuccessModal} transparent animationType="fade">
-                <View style={pg.modalOverlay}>
-                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
-                        <div style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#dcfce7", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
-                            <Feather name="check-circle" size={32} color="#16a34a" />
-                        </div>
-                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8, textAlign: "center" }}>Success!</Text>
-                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>{successMessage}</Text>
-                        <TouchableOpacity style={pg.submitBtn} onPress={() => setShowSuccessModal(false)}>
-                            <Text style={pg.submitBtnText}>Done</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </Modal>
-
-            {/* ── Error Modal ──────────────────────────────────────────────── */}
-            <Modal visible={showErrorModal} transparent animationType="fade">
-                <View style={pg.modalOverlay}>
-                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
-                        <div style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#fee2e2", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
-                            <Feather name="alert-circle" size={32} color="#dc2626" />
-                        </div>
-                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8 }}>Error</Text>
-                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>{errorMessage}</Text>
-                        <TouchableOpacity style={[pg.submitBtn, { backgroundColor: "#dc2626" }]} onPress={() => setShowErrorModal(false)}>
-                            <Text style={pg.submitBtnText}>Close</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </Modal>
         </View>
     );
 };

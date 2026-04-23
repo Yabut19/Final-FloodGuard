@@ -4,9 +4,10 @@ import { Feather } from "@expo/vector-icons";
 import { styles } from "../styles/globalStyles";
 import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
+import { formatPST } from "../utils/dateUtils";
 import { MABOLO_REGION } from "../config/constants";
 import { API_BASE_URL } from "../config/api";
-import useSensorSocket from "../utils/useSensorSocket";
+import useDataSync from "../utils/useDataSync";
 
 const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const [selectedSensor, setSelectedSensor] = useState(null);
@@ -37,7 +38,7 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                     (s.reading_status || "").toLowerCase() === "warning" ? "elevated" : "high",
                 flood_level: Number(s.flood_level || 0),
                 raw_distance: Number(s.raw_distance || 0),
-                last_updated: s.last_seen ? new Date(s.last_seen).toLocaleString() : "No data",
+                last_updated: s.last_seen ? formatPST(s.last_seen) : "No data",
                 is_offline: s.is_offline
             }));
 
@@ -56,20 +57,26 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
         return () => { clearInterval(interval); };
     }, []);
 
-    // ── Real-time WebSocket: patch matching sensor on each sensor_update event ──
-    useSensorSocket((reading) => {
-        setSensorData(prev => prev.map(s => {
-            if (s.sensor_id !== reading.sensor_id) return s;
-            const isOffline = reading.is_offline || false;
-            return {
-                ...s,
-                flood_level:  Number(reading.flood_level || 0),
-                raw_distance: Number(reading.raw_distance || 0),
-                status:       isOffline ? "offline" : (reading.status?.toLowerCase() || "normal"),
-                is_offline:   isOffline,
-                last_updated: new Date().toLocaleString(),
-            };
-        }));
+    // ── Real-time Data Synchronization ──
+    useDataSync({
+        onSensorUpdate: (reading) => {
+            setSensorData(prev => prev.map(s => {
+                if (s.sensor_id !== reading.sensor_id) return s;
+                const isOffline = reading.is_offline || false;
+                return {
+                    ...s,
+                    flood_level:  Number(reading.flood_level || 0),
+                    raw_distance: Number(reading.raw_distance || 0),
+                    status:       isOffline ? "offline" : (reading.status?.toLowerCase() || "normal"),
+                    is_offline:   isOffline,
+                    last_updated: formatPST(new Date()),
+                };
+            }));
+        },
+        onSensorListUpdate: () => {
+            console.log("[SensorMap] Sensor registry changed, refreshing map...");
+            fetchSensorData();
+        }
     });
 
     // ── Animation for blinking dots ───────────────────────────────
@@ -368,9 +375,11 @@ const SensorMapPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                             </Text>
                         </View>
                         <View style={styles.dashboardTopRight}>
-                            <View style={styles.dashboardStatusPill}>
-                                <View style={styles.dashboardStatusDot} />
-                                <Text style={styles.dashboardStatusText}>System Online</Text>
+                            <View style={[styles.dashboardStatusPill, { backgroundColor: sensorData.filter(s => !s.is_offline).length >= 1 ? "rgba(22, 163, 74, 0.1)" : "rgba(100, 116, 139, 0.1)" }]}>
+                                <View style={[styles.dashboardStatusDot, { backgroundColor: sensorData.filter(s => !s.is_offline).length >= 1 ? "#16a34a" : "#64748b" }]} />
+                                <Text style={[styles.dashboardStatusText, { color: sensorData.filter(s => !s.is_offline).length >= 1 ? "#16a34a" : "#64748b" }]}>
+                                    {sensorData.filter(s => !s.is_offline).length >= 1 ? "Online" : "Offline"}
+                                </Text>
                             </View>
                             <RealTimeClock style={styles.dashboardTopDate} />
                         </View>

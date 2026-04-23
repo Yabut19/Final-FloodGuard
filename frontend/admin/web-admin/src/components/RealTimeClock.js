@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { Text } from "react-native";
-import { formatDateTime } from "../utils/helpers";
+import { formatPST } from "../utils/dateUtils";
 
 const RealTimeClock = ({ style }) => {
     const [dateTime, setDateTime] = useState(() => {
         const now = new Date();
-        return formatDateTime(now);
+        return formatPST(now);
     });
 
     useEffect(() => {
         const tick = () => {
             const now = new Date();
-            setDateTime(formatDateTime(now));
+            setDateTime(formatPST(now));
         };
         tick();
         const interval = setInterval(tick, 1000);

@@ -310,12 +310,13 @@ function AdminDashboard({ userRole, onLogout }) {
                 <Text style={styles.statusText}>System Online</Text>
               </View>
               <Text style={styles.dateText}>
-                {new Date().toLocaleDateString("en-US", {
+                {new Intl.DateTimeFormat("en-US", {
+                  timeZone: "Asia/Manila",
                   weekday: "long",
                   year: "numeric",
                   month: "long",
                   day: "numeric",
-                })}
+                }).format(new Date())}
               </Text>
             </View>
           </View>

@@ -60,6 +60,95 @@ const useUserLocation = () => useContext(LocationContext);
 const NotificationContext = createContext(null);
 const useNotifications = () => useContext(NotificationContext);
 
+const SensorStatusContext = createContext({ isOnline: true });
+const useSensorStatus = () => useContext(SensorStatusContext);
+
+const SocketContext = createContext(null);
+export const useSocket = () => useContext(SocketContext);
+
+const SocketProvider = ({ children }) => {
+  const [socket, setSocket] = useState(null);
+
+  useEffect(() => {
+    const s = io(API_BASE, {
+      transports: ["websocket", "polling"],
+      reconnectionAttempts: 10,
+    });
+    
+    s.on("connect", () => console.log("[Socket] Connection established"));
+    s.on("disconnect", () => console.log("[Socket] Connection lost"));
+    
+    setSocket(s);
+    return () => {
+      s.disconnect();
+    };
+  }, []);
+
+  return (
+    <SocketContext.Provider value={socket}>
+      {children}
+    </SocketContext.Provider>
+  );
+};
+
+const SensorStatusProvider = ({ children }) => {
+  const [isOnline, setIsOnline] = useState(true);
+  return (
+    <SensorStatusContext.Provider value={{ isOnline, setIsOnline }}>
+      {children}
+    </SensorStatusContext.Provider>
+  );
+};
+
+/**
+ * Utility for standardized date and time formatting
+ * Philippine Standard Time (UTC+8 / Asia/Manila)
+ */
+const formatPST = (date) => {
+    if (!date) return "—";
+    const d = typeof date === 'string' ? new Date(date) : date;
+    if (isNaN(d.getTime())) return "—";
+    const options = {
+        timeZone: 'Asia/Manila',
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+    };
+    const formatter = new Intl.DateTimeFormat('en-US', options);
+    const parts = formatter.formatToParts(d);
+    const getPart = (type) => parts.find(p => p.type === type)?.value || "";
+    
+    // Requested Format: Thursday, 23 April 2026 • 6:54:12 PM
+    return `${getPart('weekday')}, ${getPart('day')} ${getPart('month')} ${getPart('year')} • ${getPart('hour')}:${getPart('minute')}:${getPart('second')} ${getPart('dayPeriod')}`;
+};
+
+const formatPSTShort = (date) => {
+    if (!date) return "—";
+    const d = typeof date === 'string' ? new Date(date) : date;
+    if (isNaN(d.getTime())) return "—";
+    const options = {
+        timeZone: 'Asia/Manila',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+    };
+    return new Intl.DateTimeFormat('en-US', options).format(d);
+};
+
+const SystemTime = ({ style }) => {
+    const [time, setTime] = useState(formatPST(new Date()));
+    useEffect(() => {
+        const interval = setInterval(() => setTime(formatPST(new Date())), 1000);
+        return () => clearInterval(interval);
+    }, []);
+    return <Text style={style}>{time}</Text>;
+};
+
 export const theme = {
   background: "#1E2A38",
   surface: "#283747",
@@ -1788,7 +1877,7 @@ const CustomHeader = ({ navigation, title, subtitle }) => {
       </TouchableOpacity>
       <View style={styles.dashHeaderTexts}>
         <Text style={styles.dashHeaderTitle}>{title}</Text>
-        <Text style={styles.dashHeaderSubtitle} numberOfLines={1} ellipsizeMode="tail">{subtitle}</Text>
+        <SystemTime style={[styles.dashHeaderSubtitle, { color: '#74C5E6', fontSize: 10, marginTop: 2 }]} />
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         <TouchableOpacity
@@ -1927,6 +2016,8 @@ const WelcomeBanner = () => {
   const currentHour = new Date().getHours();
   const greeting = currentHour < 12 ? "Good Morning" : currentHour < 18 ? "Good Afternoon" : "Good Evening";
 
+  const { isOnline } = useSensorStatus();
+
   return (
     <LinearGradient
       colors={['#1e293b', '#0f172a']}
@@ -1939,8 +2030,10 @@ const WelcomeBanner = () => {
           <Text style={styles.welcomeGreeting}>{greeting},</Text>
           <Text style={styles.welcomeName}>{firstName}!</Text>
           <View style={styles.welcomeStatusRow}>
-            <View style={styles.welcomePulse} />
-            <Text style={styles.welcomeStatusText}>System Secure & Operational</Text>
+            <View style={[styles.welcomePulse, { backgroundColor: isOnline ? '#2fb864' : '#64748b' }]} />
+            <Text style={[styles.welcomeStatusText, { color: isOnline ? '#2fb864' : '#94a3b8' }]}>
+              {isOnline ? "System secure and operational" : "System offline"}
+            </Text>
           </View>
         </View>
         <View style={styles.welcomeAvatarContainer}>
@@ -1984,7 +2077,9 @@ const DashboardScreen = ({ navigation }) => {
     fetchUser();
   }, []);
 
-  // Real-time sensor stream via SSE, with polling fallback
+  // Real-time sensor stream via WebSocket
+  const socket = useSocket();
+
   useEffect(() => {
     const parseSensor = (data) => {
       if (data && data.sensor_id) {
@@ -2004,37 +2099,34 @@ const DashboardScreen = ({ navigation }) => {
       setLoadingSensor(false);
     };
 
-    const startPolling = () => {
-      const poll = async () => {
-        try {
-          const res = await fetch(`${API_BASE}/api/iot/latest`);
-          if (res.ok) parseSensor(await res.json());
-          else setLoadingSensor(false);
-        } catch (e) { setLoadingSensor(false); }
-      };
-      poll();
-      fallbackRef.current = setInterval(poll, 5000);
+    const fetchInitial = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/iot/latest`);
+        if (res.ok) parseSensor(await res.json());
+        else setLoadingSensor(false);
+      } catch (e) { setLoadingSensor(false); }
     };
 
-    if (typeof EventSource !== "undefined") {
-      const connectSSE = () => {
-        try {
-          const es = new EventSource(`${API_BASE}/api/iot/stream`);
-          esRef.current = es;
-          es.onmessage = (e) => { try { parseSensor(JSON.parse(e.data)); } catch (_) { } };
-          es.onerror = () => { es.close(); esRef.current = null; setTimeout(connectSSE, 5000); };
-        } catch (_) { startPolling(); }
-      };
-      connectSSE();
-    } else {
-      startPolling();
+    fetchInitial();
+
+    if (socket) {
+      socket.on("sensor_update", (data) => {
+        console.log("[Mobile] Live sensor update:", data);
+        parseSensor(data);
+      });
+      socket.on("threshold_update", (data) => {
+        console.log("[Mobile] Threshold update:", data);
+        fetchInitial(); // Refresh to get new thresholds
+      });
     }
 
     return () => {
-      if (esRef.current) { esRef.current.close(); esRef.current = null; }
-      if (fallbackRef.current) { clearInterval(fallbackRef.current); fallbackRef.current = null; }
+      if (socket) {
+        socket.off("sensor_update");
+        socket.off("threshold_update");
+      }
     };
-  }, []);
+  }, [socket]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -2055,7 +2147,12 @@ const DashboardScreen = ({ navigation }) => {
     navigation.replace("Landing");
   };
 
+  const { setIsOnline } = useSensorStatus();
   const isOffline = !latestSensor || latestSensor.status === "OFFLINE" || latestSensor.is_offline;
+  
+  useEffect(() => {
+    setIsOnline(!isOffline);
+  }, [isOffline]);
   
   const getLiveStatus = () => {
     if (isOffline) return "OFFLINE";
@@ -2239,11 +2336,28 @@ const MapScreen = ({ navigation, route }) => {
     }
   };
 
+  const socket = useSocket();
+
   useEffect(() => {
     fetchSensorData();
-    const interval = setInterval(fetchSensorData, 3000);
-    return () => clearInterval(interval);
-  }, []);
+    
+    if (socket) {
+      socket.on("sensor_update", (data) => {
+        console.log("[Mobile Map] Sensor update:", data);
+        const sensorRecord = data?.sensor_id ? [{
+          ...data,
+          flood_level: Number(data.flood_level ?? 0),
+          raw_distance: Number(data.raw_distance ?? 0),
+          status: data.is_offline ? "OFFLINE" : (data.status || "UNKNOWN"),
+        }] : [];
+        setSensorData(sensorRecord);
+      });
+    }
+
+    return () => {
+      if (socket) socket.off("sensor_update");
+    };
+  }, [socket]);
 
   const latestMapSensor = sensorData[0] || {};
   const mergedSensors = [
@@ -2384,22 +2498,31 @@ const AlertsScreen = ({ navigation }) => {
     }
   };
 
+  const socket = useSocket();
+
   useEffect(() => {
     fetchAlerts();
 
-    // ── REAL-TIME BROADCAST: Achieve sub-2-second latency for alerting ──
-    const socket = io(API_BASE, { transports: ["websocket", "polling"] });
-    socket.on("new_notification", () => {
-      console.log("[WS] Alert list refreshing instantly...");
-      fetchAlerts();
-    });
+    if (socket) {
+      socket.on("new_notification", () => {
+        console.log("[WS] Alert list refreshing instantly...");
+        fetchAlerts();
+      });
+      socket.on("alert_update", () => {
+        console.log("[WS] Alerts updated, refreshing list...");
+        fetchAlerts();
+      });
+    }
 
     const interval = setInterval(fetchAlerts, 15000); // Polling as fallback only
     return () => {
-      socket.disconnect();
+      if (socket) {
+        socket.off("new_notification");
+        socket.off("alert_update");
+      }
       clearInterval(interval);
     };
-  }, []);
+  }, [socket]);
 
   const handleDeleteAlert = (alertId, alertTitle) => {
     Alert.alert(
@@ -2590,7 +2713,7 @@ const AlertsScreen = ({ navigation }) => {
         ) : null}
         <View style={styles.alertMeta}>
           <Text style={styles.alertMetaText}>{alert.location}</Text>
-          <Text style={styles.alertMetaText}>{alert.timestamp && !isNaN(Date.parse(alert.timestamp)) ? new Date(alert.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : alert.timestamp}</Text>
+          <Text style={styles.alertMetaText}>{alert.timestamp ? formatPST(alert.timestamp) : "—"}</Text>
         </View>
       </TouchableOpacity>
     );
@@ -2755,7 +2878,7 @@ const AlertDetailScreen = ({ route, navigation }) => {
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Ionicons name="time-outline" size={14} color="#94a3b8" />
-              <Text style={styles.alertMetaText}>{alert.timestamp && !isNaN(Date.parse(alert.timestamp)) ? new Date(alert.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : alert.timestamp}</Text>
+              <Text style={styles.alertMetaText}>{alert.timestamp ? formatPST(alert.timestamp) : "—"}</Text>
             </View>
           </View>
         </Card>
@@ -3135,11 +3258,25 @@ const EvacuationScreen = ({ navigation }) => {
     }
   };
 
+  const socket = useSocket();
+
   useFocusEffect(
     React.useCallback(() => {
       fetchCenters();
     }, [])
   );
+
+  useEffect(() => {
+    if (socket) {
+      socket.on("evacuation_update", (data) => {
+        console.log("[Mobile Evac] Update received:", data);
+        fetchCenters();
+      });
+    }
+    return () => {
+      if (socket) socket.off("evacuation_update");
+    };
+  }, [socket]);
 
   const onRefresh = React.useCallback(() => {
     setRefreshing(true);
@@ -3902,7 +4039,7 @@ const ReportScreen = ({ navigation, userName }) => {
                   </View>
                 </View>
                 <Text style={styles.reportItemLocation}>{report.location}</Text>
-                <Text style={styles.reportItemTime}>{report.timestamp}</Text>
+                <Text style={styles.reportItemTime}>{report.timestamp ? formatPST(report.timestamp) : "—"}</Text>
 
                 {/* Official Verification Details */}
                 {report.status.toLowerCase() === "verified" && (
@@ -4803,13 +4940,9 @@ function NotificationProvider({ children }) {
   }, [readIds]);
 
   // ── REAL-TIME BROADCAST: delivering sub-2-second latency ──
+  const socket = useSocket();
   useEffect(() => {
-    const socket = io(API_BASE, {
-      transports: ["websocket", "polling"],
-      reconnectionAttempts: 10,
-    });
-
-    socket.on("connect", () => console.log("[WS] Alerts connection established"));
+    if (!socket) return;
 
     socket.on("new_notification", (data) => {
       console.log("[WS] Instant alert received:", data);
@@ -4866,8 +4999,10 @@ function NotificationProvider({ children }) {
       }
     });
 
-    return () => socket.disconnect();
-  }, []); // Empty dependency array ensures we only have ONE socket listener
+    return () => {
+      if (socket) socket.off("new_notification");
+    };
+  }, [socket]); // Empty dependency array ensures we only have ONE socket listener
 
   useEffect(() => {
     loadReadIds();
@@ -4968,7 +5103,7 @@ function NotificationProvider({ children }) {
         icon: ' megaphone-outline',
         accent: a.level === 'critical' ? '#e2463b' : a.level === 'warning' ? '#f29339' : '#f5c542',
         displayType: 'ANNOUNCEMENT',
-        time: new Date(a.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        time: formatPSTShort(a.created_at)
       }));
 
       const normalizedReports = (reports || []).map(r => ({
@@ -4981,7 +5116,7 @@ function NotificationProvider({ children }) {
         icon: r.icon || 'people-outline',
         accent: '#74C5E6',
         displayType: 'COMMUNITY REPORT',
-        time: new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        time: formatPSTShort(r.created_at)
       }));
 
       const combined = [...normalizedAlerts, ...normalizedReports].sort((a, b) =>
@@ -5051,64 +5186,68 @@ export default function App() {
   const [toggles, setToggles] = useState({ weather: true, community: false });
 
   return (
-    <LocationProvider>
-      <NotificationProvider>
-        <ThemeContext.Provider value={{ theme }}>
-          <StatusBar
-            barStyle="light-content"
-            backgroundColor={theme.background}
-          />
-          <NavigationContainer ref={navigationRef}>
-            <Stack.Navigator
-              initialRouteName="Loading"
-              screenOptions={{
-                headerShown: false,
-                animationEnabled: false,
-                cardStyleInterpolator: CardStyleInterpolators.forNoAnimation,
-              }}
-            >
-              <Stack.Screen name="Loading" component={LoadingScreen} />
-              <Stack.Screen name="Landing" component={LandingScreen} />
-              <Stack.Screen name="Login" component={LoginScreen} />
-              <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
-              <Stack.Screen name="Welcome" component={WelcomeScreen} />
-              <Stack.Screen name="Account">
-                {(props) => (
-                  <AccountScreen {...props} form={form} setForm={setForm} />
-                )}
-              </Stack.Screen>
-              <Stack.Screen name="Location">
-                {(props) => (
-                  <LocationScreen
-                    {...props}
-                    selection={selection}
-                    setSelection={setSelection}
-                    area={area}
-                    setArea={setArea}
-                  />
-                )}
-              </Stack.Screen>
-              <Stack.Screen name="Notifications">
-                {(props) => (
-                  <NotificationsScreen
-                    {...props}
-                    toggles={toggles}
-                    setToggles={setToggles}
-                    form={form}
-                    selection={selection}
-                  />
-                )}
-              </Stack.Screen>
-              <Stack.Screen name="MainDrawer" component={MainDrawer} />
-              <Stack.Screen name="AlertDetail" component={AlertDetailScreen} />
-              <Stack.Screen name="EvacuationMap" component={EvacuationMapScreen} />
-              <Stack.Screen name="ActiveNavigation" component={ActiveNavigationScreen} />
-              <Stack.Screen name="Map" component={MapScreen} />
-            </Stack.Navigator>
-          </NavigationContainer>
-        </ThemeContext.Provider>
-      </NotificationProvider>
-    </LocationProvider>
+    <SocketProvider>
+      <SensorStatusProvider>
+        <LocationProvider>
+          <NotificationProvider>
+            <ThemeContext.Provider value={{ theme }}>
+              <StatusBar
+                barStyle="light-content"
+                backgroundColor={theme.background}
+              />
+              <NavigationContainer ref={navigationRef}>
+                <Stack.Navigator
+                  initialRouteName="Loading"
+                  screenOptions={{
+                    headerShown: false,
+                    animationEnabled: false,
+                    cardStyleInterpolator: CardStyleInterpolators.forNoAnimation,
+                  }}
+                >
+                  <Stack.Screen name="Loading" component={LoadingScreen} />
+                  <Stack.Screen name="Landing" component={LandingScreen} />
+                  <Stack.Screen name="Login" component={LoginScreen} />
+                  <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
+                  <Stack.Screen name="Welcome" component={WelcomeScreen} />
+                  <Stack.Screen name="Account">
+                    {(props) => (
+                      <AccountScreen {...props} form={form} setForm={setForm} />
+                    )}
+                  </Stack.Screen>
+                  <Stack.Screen name="Location">
+                    {(props) => (
+                      <LocationScreen
+                        {...props}
+                        selection={selection}
+                        setSelection={setSelection}
+                        area={area}
+                        setArea={setArea}
+                      />
+                    )}
+                  </Stack.Screen>
+                  <Stack.Screen name="Notifications">
+                    {(props) => (
+                      <NotificationsScreen
+                        {...props}
+                        toggles={toggles}
+                        setToggles={setToggles}
+                        form={form}
+                        selection={selection}
+                      />
+                    )}
+                  </Stack.Screen>
+                  <Stack.Screen name="MainDrawer" component={MainDrawer} />
+                  <Stack.Screen name="AlertDetail" component={AlertDetailScreen} />
+                  <Stack.Screen name="EvacuationMap" component={EvacuationMapScreen} />
+                  <Stack.Screen name="ActiveNavigation" component={ActiveNavigationScreen} />
+                  <Stack.Screen name="Map" component={MapScreen} />
+                </Stack.Navigator>
+              </NavigationContainer>
+            </ThemeContext.Provider>
+          </NotificationProvider>
+        </LocationProvider>
+      </SensorStatusProvider>
+    </SocketProvider>
   );
 }
 

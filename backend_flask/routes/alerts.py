@@ -2,10 +2,19 @@ import logging
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from utils.db import get_db
+from utils.timezone_utils import get_pst_now, format_pst
 
 logger = logging.getLogger(__name__)
 
 alerts_bp = Blueprint('alerts', __name__)
+
+def _emit_alert_update():
+    """Broadcast alert changes to all WebSocket clients."""
+    try:
+        from app import socketio
+        socketio.emit("alert_update", {"message": "refresh"}, namespace="/")
+    except Exception:
+        pass
 
 @alerts_bp.route('/user/<int:user_id>/dismiss/<int:alert_id>', methods=['POST'])
 def dismiss_alert_for_user(user_id, alert_id):
@@ -16,8 +25,8 @@ def dismiss_alert_for_user(user_id, alert_id):
         cursor.execute("""
             INSERT INTO user_alert_dismissals (user_id, alert_id)
             VALUES (%s, %s)
-            ON DUPLICATE KEY UPDATE dismissed_at = NOW()
-        """, (user_id, alert_id))
+            ON DUPLICATE KEY UPDATE dismissed_at = %s
+        """, (user_id, alert_id, format_pst(get_pst_now())))
         db.commit()
         return jsonify({"message": "Alert dismissed for user"}), 200
     except Exception as e:
@@ -37,8 +46,8 @@ def dismiss_all_alerts_for_user(user_id):
             INSERT INTO user_alert_dismissals (user_id, alert_id)
             SELECT %s, id FROM alerts 
             WHERE status = 'active'
-            ON DUPLICATE KEY UPDATE dismissed_at = NOW()
-        """, (user_id,))
+            ON DUPLICATE KEY UPDATE dismissed_at = %s
+        """, (user_id, format_pst(get_pst_now())))
         
         db.commit()
         return jsonify({"message": "All alerts marked as dismissed"}), 200
@@ -75,6 +84,7 @@ def delete_alert(alert_id):
         db.commit()
 
         if cursor.rowcount > 0:
+            _emit_alert_update()
             return jsonify({"message": "Alert deleted successfully"}), 200
         else:
             return jsonify({"error": "Alert not found"}), 404
@@ -160,8 +170,8 @@ def create_alert():
     
     cursor.execute("""
         INSERT INTO alerts (title, description, level, barangay, recommended_action, status, source, evacuation_status, evacuation_location, evacuation_capacity, timestamp)
-        VALUES (%s, %s, %s, %s, %s, 'active', %s, %s, %s, %s, NOW())
-    """, (title, description, level, barangay, recommended_action, source, evacuation_status, evacuation_location, evacuation_capacity))
+        VALUES (%s, %s, %s, %s, %s, 'active', %s, %s, %s, %s, %s)
+    """, (title, description, level, barangay, recommended_action, source, evacuation_status, evacuation_location, evacuation_capacity, format_pst(get_pst_now())))
     
     db.commit()
     alert_id = cursor.lastrowid
@@ -183,7 +193,7 @@ def create_alert():
                 "evacuation_status": evacuation_status,
                 "evacuation_location": evacuation_location,
                 "evacuation_capacity": evacuation_capacity,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": get_pst_now().isoformat()
                 # DO NOT include recommended_action or incident_status for evacuation
             }
         else:
@@ -195,11 +205,13 @@ def create_alert():
                 "level": level,
                 "barangay": barangay,
                 "recommended_action": recommended_action,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": get_pst_now().isoformat()
             }
 
         socketio.emit("new_notification", notification_payload, namespace="/")
     except Exception as ws_err:
         logger.warning(f"WebSocket broadcast failed: {ws_err}")
+
+    _emit_alert_update()
 
     return jsonify({"message": "Alert created successfully", "id": alert_id}), 201

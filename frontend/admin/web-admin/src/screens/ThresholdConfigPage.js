@@ -6,6 +6,8 @@ import { styles } from "../styles/globalStyles";
 import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
 import { API_BASE_URL } from "../config/api";
+import { getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
+import useDataSync from "../utils/useDataSync";
 
 const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) => {
     const [advisoryLevel, setAdvisoryLevel] = useState("15");
@@ -17,10 +19,42 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
     const [errorMessage, setErrorMessage] = useState("");
     const [infoMessage, setInfoMessage] = useState("");
     const [initialThresholds, setInitialThresholds] = useState({ advisory: "15", warning: "30", critical: "50" });
+    const [onlineSensors, setOnlineSensors] = useState(0);
 
     useEffect(() => {
+        const fetchSystemStatus = async () => {
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/iot/sensors/status-all`);
+                if (res.ok) {
+                    const data = await res.json();
+                    const online = data.filter(s => !s.is_offline).length;
+                    setOnlineSensors(online);
+                }
+            } catch (e) {
+                console.error("Status fetch error:", e);
+            }
+        };
+
         fetchThresholds();
+        fetchSystemStatus();
+        const interval = setInterval(fetchSystemStatus, 30000);
+        return () => clearInterval(interval);
     }, []);
+
+    // ── Real-time Data Synchronization ──
+    useDataSync({
+        onThresholdUpdate: (data) => {
+            console.log("[ThresholdConfig] Thresholds updated by another user, syncing...");
+            setAdvisoryLevel(String(data.advisory_level));
+            setWarningLevel(String(data.warning_level));
+            setCriticalLevel(String(data.critical_level));
+            setInitialThresholds({
+                advisory: String(data.advisory_level),
+                warning: String(data.warning_level),
+                critical: String(data.critical_level)
+            });
+        }
+    });
 
     const fetchThresholds = async () => {
         setIsLoading(true);
@@ -102,9 +136,11 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
                         </Text>
                     </View>
                     <View style={styles.dashboardTopRight}>
-                        <View style={styles.dashboardStatusPill}>
-                            <View style={styles.dashboardStatusDot} />
-                            <Text style={styles.dashboardStatusText}>System Online</Text>
+                        <View style={[styles.dashboardStatusPill, { backgroundColor: onlineSensors >= 1 ? "rgba(22, 163, 74, 0.1)" : "rgba(100, 116, 139, 0.1)" }]}>
+                            <View style={[styles.dashboardStatusDot, { backgroundColor: getSystemStatusColor(onlineSensors) }]} />
+                            <Text style={[styles.dashboardStatusText, { color: getSystemStatusColor(onlineSensors) }]}>
+                                {getSystemStatus(onlineSensors)}
+                            </Text>
                         </View>
                         <RealTimeClock style={styles.dashboardTopDate} />
                     </View>

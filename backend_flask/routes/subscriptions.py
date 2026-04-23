@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from utils.db import get_db
+from utils.timezone_utils import get_pst_now, format_pst
 
 subscriptions_bp = Blueprint('subscriptions', __name__)
 
@@ -216,9 +217,9 @@ def auto_escalate():
         SELECT location AS barangay, COUNT(*) AS count
         FROM reports
         WHERE status = 'verified'
-          AND timestamp >= NOW() - INTERVAL 6 HOUR
+          AND timestamp >= DATE_SUB(%s, INTERVAL 6 HOUR)
         GROUP BY location
-    """)
+    """, (format_pst(get_pst_now()),))
     barangay_counts = cursor.fetchall()
 
     results = []
@@ -284,13 +285,14 @@ def auto_escalate():
             cursor2.execute(
                 """
                 INSERT INTO alerts (title, description, level, barangay, status, timestamp)
-                VALUES (%s, %s, %s, %s, 'active', NOW())
+                VALUES (%s, %s, %s, %s, 'active', %s)
                 """,
                 (
                     f"Flood Alert — {barangay}",
                     f"Automatic alert: {count} verified flood report(s) received from {barangay} in the last 6 hours.",
                     target_level,
-                    barangay
+                    barangay,
+                    format_pst(get_pst_now())
                 )
             )
             new_id = cursor2.lastrowid
