@@ -5,6 +5,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { styles } from "../styles/globalStyles";
 import { API_BASE_URL } from "../config/api";
 import dialogs from "../utils/dialogs";
+import { areValuesEqual } from "../utils/helpers";
 
 const AdminSidebar = ({ activePage, onNavigate, onLogout, variant = "lgu" }) => {
     const isSuperAdmin = variant === "superadmin";
@@ -63,6 +64,13 @@ const AdminSidebar = ({ activePage, onNavigate, onLogout, variant = "lgu" }) => 
         email: "",
         phone: ""
     });
+    const initialProfileFormRef = React.useRef(null);
+    
+    // Standardized Success Modal state
+    const [showSuccessModal, setShowSuccessModal] = React.useState(false);
+    const [successMessage, setSuccessMessage] = React.useState("");
+    const [showErrorModal, setShowErrorModal] = React.useState(false);
+    const [errorMessage, setErrorMessage] = React.useState("");
 
     React.useEffect(() => {
         // Check for stored name on component mount
@@ -99,6 +107,16 @@ const AdminSidebar = ({ activePage, onNavigate, onLogout, variant = "lgu" }) => 
         const userId = localStorage.getItem("userId");
         const userType = isSuperAdmin ? 'admin' : 'user';
 
+        // "No Changes" Validation
+        const hasFormChanges = initialProfileFormRef.current && !areValuesEqual(profileForm, initialProfileFormRef.current);
+        const hasAvatarChanges = !!selectedAvatarFile;
+
+        if (!hasFormChanges && !hasAvatarChanges) {
+            setErrorMessage("No changes detected.");
+            setShowErrorModal(true);
+            return;
+        }
+
         setIsSaving(true);
 
         try {
@@ -133,14 +151,16 @@ const AdminSidebar = ({ activePage, onNavigate, onLogout, variant = "lgu" }) => 
 
             const data = await response.json();
             if (response.ok) {
-                dialogs.success("Updated", "Profile updated successfully");
+                setSuccessMessage("Profile successfully updated");
+                setShowSuccessModal(true);
+                setIsProfileModalVisible(false);
+                
                 setUserName(profileForm.full_name);
                 localStorage.setItem("userName", profileForm.full_name);
 
                 // Clear preview/selection state
                 setPreviewAvatarUrl(null);
                 setSelectedAvatarFile(null);
-                setIsProfileModalVisible(false);
             } else {
                 dialogs.error("Error", data.error || "Failed to update profile");
             }
@@ -380,6 +400,8 @@ const AdminSidebar = ({ activePage, onNavigate, onLogout, variant = "lgu" }) => 
                                 // Reset preview when opening modal
                                 setPreviewAvatarUrl(null);
                                 setSelectedAvatarFile(null);
+                                // Snapshot initial state
+                                initialProfileFormRef.current = { ...profileForm };
                             }}
                         >
                             <Feather name="settings" size={18} color="#e2e8f0" style={{ marginRight: 12 }} />
@@ -655,8 +677,83 @@ const AdminSidebar = ({ activePage, onNavigate, onLogout, variant = "lgu" }) => 
                     )}
                 </TouchableOpacity>
             </View>
+
+            {/* Success Modal - Standardized Design */}
+            <Modal visible={showSuccessModal} transparent animationType="fade">
+                <View style={pg.modalOverlay}>
+                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#dcfce7", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                            <Feather name="check-circle" size={32} color="#16a34a" />
+                        </View>
+                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8, textAlign: "center" }}>Success!</Text>
+                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>{successMessage}</Text>
+                        <TouchableOpacity 
+                            style={pg.submitBtn} 
+                            onPress={() => setShowSuccessModal(false)}
+                        >
+                            <Text style={pg.submitBtnText}>Done</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Error Modal */}
+            <Modal visible={showErrorModal} transparent animationType="fade">
+                <View style={pg.modalOverlay}>
+                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#fee2e2", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                            <Feather name="alert-circle" size={32} color="#dc2626" />
+                        </View>
+                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8 }}>Error</Text>
+                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>{errorMessage}</Text>
+                        <TouchableOpacity style={[pg.submitBtn, { backgroundColor: "#dc2626" }]} onPress={() => setShowErrorModal(false)}>
+                            <Text style={pg.submitBtnText}>Close</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
+};
+
+const pg = {
+    modalOverlay: { 
+        flex: 1, 
+        backgroundColor: "rgba(0,0,0,0.5)", 
+        alignItems: "center", 
+        justifyContent: "center", 
+        padding: 16,
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 9999
+    },
+    modalBox: { 
+        backgroundColor: "#fff", 
+        borderRadius: 16, 
+        overflow: "hidden", 
+        width: "100%", 
+        maxWidth: 680, 
+        maxHeight: "90%", 
+        boxShadow: "0px 8px 24px rgba(0, 0, 0, 0.2)", 
+        elevation: 10 
+    },
+    submitBtn: { 
+        flexDirection: "row", 
+        alignItems: "center", 
+        justifyContent: "center", 
+        backgroundColor: "#3b82f6", 
+        borderRadius: 16, 
+        paddingVertical: 12, 
+        paddingHorizontal: 24 
+    },
+    submitBtnText: { 
+        fontSize: 14, 
+        fontFamily: "Poppins_600SemiBold", 
+        color: "#fff" 
+    },
 };
 
 export default AdminSidebar;

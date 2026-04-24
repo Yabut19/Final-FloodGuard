@@ -7,7 +7,7 @@ import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
 import { API_BASE_URL } from "../config/api";
 import { getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
-import { authFetch } from "../utils/helpers";
+import { authFetch, areValuesEqual } from "../utils/helpers";
 import useDataSync from "../utils/useDataSync";
 import TopRightStatusIndicator from "../components/TopRightStatusIndicator";
 
@@ -87,9 +87,13 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
         setErrorMessage("");
         setInfoMessage("");
 
-        if (advisoryLevel === initialThresholds.advisory &&
-            warningLevel === initialThresholds.warning &&
-            criticalLevel === initialThresholds.critical) {
+        const currentThresholds = {
+            advisory: advisoryLevel,
+            warning: warningLevel,
+            critical: criticalLevel
+        };
+
+        if (initialThresholds && areValuesEqual(currentThresholds, initialThresholds)) {
             setInfoMessage("No changes detected. The configurations remain the same.");
             setTimeout(() => setInfoMessage(""), 4000);
             return;

@@ -8,12 +8,14 @@ def get_pst_now():
     return datetime.now(pytz.utc).astimezone(PST)
 
 def format_pst(dt):
-    """Format a datetime object to a string in Philippine Standard Time."""
+    """Format a datetime object to a naive string in Philippine Standard Time."""
     if dt is None:
         return None
     if dt.tzinfo is None:
-        # Assume naive datetime from DB is UTC
-        dt = pytz.utc.localize(dt)
+        # If naive, assume it's already in the target timezone (PST)
+        # and just format it without adding/subtracting hours.
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    # If aware, convert to PST first
     return dt.astimezone(PST).strftime("%Y-%m-%d %H:%M:%S")
 
 def to_pst(dt):

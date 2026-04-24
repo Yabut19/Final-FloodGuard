@@ -8,7 +8,6 @@ import { API_BASE_URL } from "../config/api";
 import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
 import { authFetch } from "../utils/helpers";
 import useDataSync from "../utils/useDataSync";
-import dialogs from "../utils/dialogs";
 import TopRightStatusIndicator from "../components/TopRightStatusIndicator";
 
 const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
@@ -42,6 +41,14 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const [showAlertDetailsModal, setShowAlertDetailsModal] = useState(false);
     const [selectedAlertForModal, setSelectedAlertForModal] = useState(null);
     const [onlineSensors, setOnlineSensors] = useState(0);
+
+    const [showSuccessModal, setShowSuccessModal] = useState(false);
+    const [successMessage, setSuccessMessage] = useState("");
+    const [showErrorModal, setShowErrorModal] = useState(false);
+    const [errorMessage, setErrorMessage] = useState("");
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [alertToDelete, setAlertToDelete] = useState(null);
+    const [isSubmitting, setIsSubmitting] = useState(false);
     
 
     // Broadcast Card Flip State
@@ -169,14 +176,17 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             });
             const data = await response.json();
             if (response.ok) {
-                dialogs.success('Escalated', `✅ Alert escalated: ${data.from_level} → ${data.to_level}`);
+                setSuccessMessage(`Alert escalated: ${data.from_level} → ${data.to_level}`);
+                setShowSuccessModal(true);
                 fetchActiveAlerts();
                 fetchAlertHistory();
             } else {
-                dialogs.error('Error', data.error || 'Failed to escalate alert.');
+                setErrorMessage(data.error || 'Failed to escalate alert.');
+                setShowErrorModal(true);
             }
         } catch (err) {
-            dialogs.error('Network Error', 'Network error while escalating.');
+            setErrorMessage('Network error while escalating.');
+            setShowErrorModal(true);
         } finally {
             setEscalatingId(null);
         }
@@ -184,35 +194,40 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
 
 
-    const handleDeleteAlert = async (alertId, alertTitle) => {
-        const result = await dialogs.confirm(
-            "Delete Alert", 
-            `Are you sure you want to delete this alert?<br/><br/><b style="color: #0f172a; font-size: 18px;">${alertTitle}</b>`
-        );
-        
-        if (result.isConfirmed) {
-            setDeletingId(alertId);
-            try {
-                const deleteUrl = `${API_BASE_URL}/api/alerts/${alertId}`;
-                const response = await authFetch(deleteUrl, {
-                    method: 'DELETE',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                
-                const responseData = await response.json();
-                if (response.ok) {
-                    dialogs.success('Deleted', 'Alert deleted successfully.');
-                    fetchActiveAlerts();
-                    fetchAlertHistory();
-                } else {
-                    dialogs.error('Error', responseData.error || 'Failed to delete alert.');
-                }
-            } catch (err) {
-                dialogs.error('Network Error', 'Network error while deleting: ' + err.message);
-            } finally {
-                setDeletingId(null);
+    const handleDeleteAlert = async (alert) => {
+        setAlertToDelete(alert);
+        setShowDeleteModal(true);
+    };
+
+    const confirmDeleteAlert = async () => {
+        if (!alertToDelete) return;
+        setIsSubmitting(true);
+        try {
+            const response = await authFetch(`${API_BASE_URL}/api/alerts/${alertToDelete.id}`, {
+                method: "DELETE"
+            });
+            if (response.ok) {
+                setSuccessMessage(`Successfully deleted alert: ${alertToDelete?.title || "Alert"}`);
+                setShowDeleteModal(false);
+                setShowSuccessModal(true);
+                setAlertToDelete(null);
+                fetchActiveAlerts();
+                fetchAlertHistory();
+            } else {
+                setErrorMessage(`Failed to delete alert: ${alertToDelete?.title || "Alert"}`);
+                setShowErrorModal(true);
             }
+        } catch (error) {
+            setErrorMessage("Network error deleting alert");
+            setShowErrorModal(true);
+        } finally {
+            setIsSubmitting(false);
         }
+    };
+
+    const cancelDeleteAlert = () => {
+        setShowDeleteModal(false);
+        setAlertToDelete(null);
     };
 
     const fetchPendingReports = async () => {
@@ -237,6 +252,13 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             console.error("Error fetching all reports:", error);
             setLoadingAllReports(false);
         }
+    };
+
+    const fetchData = () => {
+        fetchActiveAlerts();
+        fetchPendingReports();
+        fetchAllReports();
+        fetchAlertHistory();
     };
 
     const fetchAlertHistory = async () => {
@@ -334,7 +356,8 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
     const handleBroadcast = async () => {
         if (selectedBarangays.length === 0 || !alertTitle) {
-            dialogs.alert("Validation", "Please fill in all fields (Title, Barangays)", 'warning');
+            setErrorMessage("Please fill in all fields (Title, Barangays)");
+            setShowErrorModal(true);
             return;
         }
 
@@ -359,17 +382,19 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             });
 
             if (response.ok) {
-                dialogs.success("Success", "Alert broadcasted successfully!");
+                setSuccessMessage("Alert broadcasted successfully!");
+                setShowSuccessModal(true);
                 setAlertTitle("");
                 setSelectedBarangays([]);
                 fetchAlertHistory(); // Refresh history list
                 fetchActiveAlerts(); // Refresh Mission Control active alerts
             } else {
-                dialogs.error("Failed", "Failed to broadcast alert.");
+                setErrorMessage("Failed to broadcast alert.");
+                setShowErrorModal(true);
             }
         } catch (error) {
-            console.error("Error broadcasting alert:", error);
-            dialogs.error("Error", "An error occurred.");
+            setErrorMessage("An error occurred.");
+            setShowErrorModal(true);
         } finally {
             setLoading(false);
         }
@@ -381,6 +406,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
         if (!recommendedAction || !recommendedAction.trim()) {
             setRecError(true);
             hasError = true;
+            setErrorMessage(`Please provide an Official Recommendation for the report from ${report.reporter_name}.`);
         } else {
             setRecError(false);
         }
@@ -388,12 +414,19 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
         if (!incidentStatus) {
             setStatusError(true);
             hasError = true;
+            if (!errorMessage) { // Only set if not already set by recommendedAction
+                setErrorMessage(`Please select an Incident Status for the report from ${report.reporter_name}.`);
+            }
         } else {
             setStatusError(false);
         }
 
-        if (hasError) return;
+        if (hasError) {
+            setShowErrorModal(true);
+            return;
+        }
         
+        setIsSubmitting(true);
         try {
             // Update report status to verified
             const response = await authFetch(`${API_BASE_URL}/api/reports/${id}/verify`, {
@@ -411,28 +444,30 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
             if (!response.ok) {
                 const err = await response.json();
-                dialogs.error("Error", (err.error || "Verification failed"));
+                setErrorMessage(err.error || `Failed to verify report from ${report.reporter_name}`);
+                setShowErrorModal(true);
                 return;
             }
 
-            // Auto-broadcast as official alert (already done by backend)
-            dialogs.success("Verified", "✅ Report verified and broadcasted as official alert!");
-            setVerifications(verifications.filter((v) => v.id !== id));
+            setSuccessMessage(`Successfully verified and broadcasted report from ${report.reporter_name}!`);
             setShowReportDetailsModal(false);
+            setShowSuccessModal(true);
+            setVerifications(verifications.filter((v) => v.id !== id));
             setRecommendedAction("");
-            fetchPendingReports();
-            fetchAllReports();
-            fetchActiveAlerts();
+            fetchData();
         } catch (error) {
-            console.error("Error verifying report:", error);
-            dialogs.error("Error", "Error verifying report");
+            setErrorMessage("Error verifying report");
+            setShowErrorModal(true);
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
-    const handleReject = async (id, report) => {
+    const handleDeleteReport = async (id, report) => {
+        setIsSubmitting(true);
         try {
-            // Update report status to dismissed
-            await authFetch(`${API_BASE_URL}/api/reports/${id}/reject`, {
+            // Update report status to dismissed (Delete Action)
+            const response = await authFetch(`${API_BASE_URL}/api/reports/${id}/reject`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ 
@@ -441,14 +476,22 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 })
             });
 
-            dialogs.success("Dismissed", "✅ Report dismissed. Notification sent to reporter.");
-            setVerifications(verifications.filter((v) => v.id !== id));
-            setShowReportDetailsModal(false);
-            fetchPendingReports();
-            fetchAllReports();
+            if (response.ok) {
+                setSuccessMessage(`Successfully deleted report from ${report.reporter_name}.`);
+                setShowReportDetailsModal(false);
+                setShowSuccessModal(true);
+                setVerifications(verifications.filter((v) => v.id !== id));
+                fetchData();
+            } else {
+                const err = await response.json();
+                setErrorMessage(err.error || `Error deleting report from ${report.reporter_name}`);
+                setShowErrorModal(true);
+            }
         } catch (error) {
-            console.error("Error rejecting report:", error);
-            dialogs.error("Error", "Error dismissing report");
+            setErrorMessage(`Network error deleting report from ${report.reporter_name}`);
+            setShowErrorModal(true);
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -850,7 +893,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                         alignItems: 'center',
                                         justifyContent: 'center'
                                     }}
-                                    onPress={() => handleDeleteAlert(item.id, item.title)}
+                                    onPress={() => handleDeleteAlert(item)}
                                 >
                                     <Feather name="trash-2" size={16} color="#dc2626" />
                                 </TouchableOpacity>
@@ -1154,11 +1197,11 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                         {/* Action Buttons — pinned to bottom of right column */}
                                         <View style={{ padding: 20, borderTopWidth: 1, borderTopColor: '#f1f5f9', flexDirection: 'row', gap: 10 }}>
                                             <TouchableOpacity
-                                                onPress={() => handleReject(selectedReportForModal.id, selectedReportForModal)}
+                                                onPress={() => handleDeleteReport(selectedReportForModal.id, selectedReportForModal)}
                                                 style={{ flex: 1, paddingVertical: 13, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6, borderWidth: 1.5, borderColor: '#e2e8f0', backgroundColor: '#ffffff' }}
                                             >
-                                                <Feather name="slash" size={14} color="#64748b" />
-                                                <Text style={{ fontSize: 13, fontFamily: "Poppins_600SemiBold", color: '#64748b' }}>Dismiss</Text>
+                                                <Feather name="trash-2" size={14} color="#dc2626" />
+                                                <Text style={{ fontSize: 13, fontFamily: "Poppins_600SemiBold", color: '#dc2626' }}>Delete</Text>
                                             </TouchableOpacity>
                                             <TouchableOpacity
                                                 onPress={() => handleVerify(selectedReportForModal.id, selectedReportForModal)}
@@ -1313,7 +1356,7 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                     <TouchableOpacity
                                         onPress={() => {
                                             setShowAlertDetailsModal(false);
-                                            handleDeleteAlert(selectedAlertForModal.id, selectedAlertForModal.title);
+                                            handleDeleteAlert(selectedAlertForModal);
                                         }}
                                         style={{ 
                                             borderWidth: 2,
@@ -1338,8 +1381,77 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 </View>
             </Modal>
 
+            {/* Success Modal */}
+            <Modal visible={showSuccessModal} transparent animationType="fade">
+                <View style={pg.modalOverlay}>
+                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#dcfce7", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                            <Feather name="check-circle" size={32} color="#16a34a" />
+                        </View>
+                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8, textAlign: "center" }}>Success!</Text>
+                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>{successMessage}</Text>
+                        <TouchableOpacity style={pg.submitBtn} onPress={() => setShowSuccessModal(false)}>
+                            <Text style={pg.submitBtnText}>Done</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Delete Confirmation Modal */}
+            <Modal visible={showDeleteModal} transparent animationType="fade">
+                <View style={pg.modalOverlay}>
+                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#fee2e2", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                            <Feather name="trash-2" size={32} color="#dc2626" />
+                        </View>
+                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8, textAlign: "center" }}>Delete Alert?</Text>
+                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>
+                            Are you sure you want to delete <Text style={{ fontFamily: "Poppins_600SemiBold", color: "#0f172a" }}>{alertToDelete?.title}</Text>? This action cannot be undone.
+                        </Text>
+                        <View style={{ flexDirection: "row", gap: 12, width: "100%" }}>
+                            <TouchableOpacity style={[pg.cancelBtn, { flex: 1 }]} onPress={cancelDeleteAlert}>
+                                <Text style={pg.cancelBtnText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={[pg.submitBtn, { flex: 1, backgroundColor: "#dc2626" }]} 
+                                onPress={confirmDeleteAlert}
+                                disabled={isSubmitting}
+                            >
+                                {isSubmitting ? <ActivityIndicator size="small" color="#fff" /> : (
+                                    <Text style={pg.submitBtnText}>Delete</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Error Modal */}
+            <Modal visible={showErrorModal} transparent animationType="fade">
+                <View style={pg.modalOverlay}>
+                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#fee2e2", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                            <Feather name="alert-circle" size={32} color="#dc2626" />
+                        </View>
+                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8 }}>Error</Text>
+                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>{errorMessage}</Text>
+                        <TouchableOpacity style={[pg.submitBtn, { backgroundColor: "#dc2626" }]} onPress={() => setShowErrorModal(false)}>
+                            <Text style={pg.submitBtnText}>Close</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 };
 
 export default AlertManagementPage;
+
+const pg = {
+    modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center", padding: 16, position: "absolute", top: 0, bottom: 0, left: 0, right: 0, zIndex: 5000 },
+    modalBox: { backgroundColor: "#fff", borderRadius: 16, overflow: "hidden", width: "100%", maxWidth: 680, maxHeight: "90%", boxShadow: "0px 8px 24px rgba(0, 0, 0, 0.2)", elevation: 10 },
+    cancelBtn: { paddingVertical: 12, paddingHorizontal: 24, borderRadius: 16, borderWidth: 1.5, borderColor: "#e2e8f0" },
+    cancelBtnText: { fontSize: 14, fontFamily: "Poppins_600SemiBold", color: "#475569" },
+    submitBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", backgroundColor: "#3b82f6", borderRadius: 16, paddingVertical: 12, paddingHorizontal: 24 },
+    submitBtnText: { fontSize: 14, fontFamily: "Poppins_600SemiBold", color: "#fff" },
+};

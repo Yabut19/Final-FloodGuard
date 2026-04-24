@@ -150,7 +150,7 @@ export const dialogs = {
     confirm: (title, text, confirmButtonText = 'Delete', cancelButtonText = 'Cancel') => {
         // Handle multiline text for "item name" effect in image
         const html = text ? `<div>${text}</div>` : '';
-        
+
         return Swal.fire({
             ...commonOptions,
             title: title || 'Are you sure?',

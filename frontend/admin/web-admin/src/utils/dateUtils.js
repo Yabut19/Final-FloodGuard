@@ -5,7 +5,20 @@
 
 export const formatPST = (date) => {
     if (!date) return "—";
-    const d = typeof date === 'string' ? new Date(date) : date;
+    
+    let d;
+    if (typeof date === 'string') {
+        // If the string is a naive format (e.g., "2026-04-24 19:00:00"),
+        // force it to be interpreted as PST (+08:00) to prevent double-shifting.
+        if (!date.includes('Z') && !date.includes('+')) {
+            const isoStr = date.includes('T') ? date : date.replace(' ', 'T');
+            d = new Date(isoStr + '+08:00');
+        } else {
+            d = new Date(date);
+        }
+    } else {
+        d = date;
+    }
 
     // Check for invalid date
     if (isNaN(d.getTime())) return "—";

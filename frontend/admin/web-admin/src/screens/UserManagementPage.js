@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { View, Text, ScrollView, TouchableOpacity, TextInput, Image } from "react-native";
+import React, { useState, useEffect, useRef } from "react";
+import { View, Text, ScrollView, TouchableOpacity, TextInput, Image, Modal, ActivityIndicator } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { styles } from "../styles/globalStyles";
@@ -7,9 +7,8 @@ import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
 import { API_BASE_URL } from "../config/api";
 import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
-import { authFetch } from "../utils/helpers";
+import { authFetch, areValuesEqual } from "../utils/helpers";
 import useDataSync from "../utils/useDataSync";
-import dialogs from "../utils/dialogs";
 import TopRightStatusIndicator from "../components/TopRightStatusIndicator";
 
 const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) => {
@@ -170,6 +169,7 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
 
     const [showAddLGUModal, setShowAddLGUModal] = useState(false);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
+    const [successMessage, setSuccessMessage] = useState("");
     const [createdUserEmail, setCreatedUserEmail] = useState("");
     const [availableLocations, setAvailableLocations] = useState(SITIOS_MABOLO);
     const [lguForm, setLguForm] = useState({
@@ -180,6 +180,10 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
         password: ""
     });
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [showErrorModal, setShowErrorModal] = useState(false);
+    const [errorMessage, setErrorMessage] = useState("");
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [userToDelete, setUserToDelete] = useState(null);
 
     // Edit User Modal State
     const [showEditUserModal, setShowEditUserModal] = useState(false);
@@ -194,6 +198,7 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
         password: ""
     });
     const [showEditPassword, setShowEditPassword] = useState(false);
+    const initialEditForm = useRef(null);
 
     const handleEditUserClick = (user) => {
         setEditingUser(user);
@@ -202,18 +207,28 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                            user.role === 'Admin' ? 'super_admin' :
                            user.role === 'User' ? 'user' : 'user';
         
-        setEditForm({
+        const formValues = {
             full_name: user.name || "",
             barangay: user.location || "",
             status: currentStatus,
             role: currentRole,
             password: ""
-        });
+        };
+        setEditForm(formValues);
+        initialEditForm.current = formValues;
         setShowEditUserModal(true);
     };
 
     const handleUpdateUser = async () => {
         if (!editingUser) return;
+
+        // "No Changes" Validation
+        if (initialEditForm.current && areValuesEqual(editForm, initialEditForm.current)) {
+            setErrorMessage("No changes detected.");
+            setShowErrorModal(true);
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             // 1. Update Name, Barangay, and Password
@@ -242,39 +257,56 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
             });
 
             if (detailRes.ok && statusRes.ok && roleRes.ok) {
-                dialogs.success("Updated", "User updated successfully");
+                setSuccessMessage(`Successfully updated user: ${editingUser.name}`);
                 setShowEditUserModal(false);
+                setShowSuccessModal(true);
                 fetchUsers();
             } else {
-                dialogs.error("Error", "Failed to update user. Some fields may not have saved.");
+                setErrorMessage("Failed to update user. Some fields may not have saved.");
+                setShowErrorModal(true);
             }
         } catch (error) {
-            dialogs.error("Error", "Network error updating user");
+            setErrorMessage("Network error updating user");
+            setShowErrorModal(true);
         } finally {
             setIsSubmitting(false);
         }
     };
 
-    const handleDeleteUser = async (userId) => {
-        const result = await dialogs.confirm("Delete User", "Are you sure you want to delete this user? This action cannot be undone.");
-        if (result.isConfirmed) {
-            try {
-                const response = await authFetch(`${API_BASE_URL}/api/admin/users/${userId}`, {
-                    method: "DELETE"
-                });
-                if (response.ok) {
-                    // Optimistically update the UI by removing the user from the local state
-                    setUsers(prevUsers => prevUsers.filter(u => u.id !== userId));
-                    dialogs.success("Deleted", "User deleted successfully");
-                    fetchUsers(); // Refresh for full data consistency and stats update
-                } else {
-                    const data = await response.json();
-                    dialogs.error("Error", "Failed to delete user: " + (data.error || "Unknown error"));
-                }
-            } catch (error) {
-                dialogs.error("Error", "Network error deleting user");
+    const handleDeleteUser = async (user) => {
+        setUserToDelete(user);
+        setShowDeleteModal(true);
+    };
+
+    const confirmDelete = async () => {
+        if (!userToDelete) return;
+        setIsSubmitting(true);
+        try {
+            const response = await authFetch(`${API_BASE_URL}/api/admin/users/${userToDelete.id}`, {
+                method: "DELETE"
+            });
+            if (response.ok) {
+                setSuccessMessage(`Successfully deleted user: ${userToDelete.name}`);
+                setShowDeleteModal(false);
+                setShowSuccessModal(true);
+                setUserToDelete(null);
+                fetchUsers();
+            } else {
+                const data = await response.json();
+                setErrorMessage(data.error || "Failed to delete user");
+                setShowErrorModal(true);
             }
+        } catch (error) {
+            setErrorMessage("Network error deleting user");
+            setShowErrorModal(true);
+        } finally {
+            setIsSubmitting(false);
         }
+    };
+
+    const cancelDelete = () => {
+        setShowDeleteModal(false);
+        setUserToDelete(null);
     };
 
     const handleAddUserClick = () => {
@@ -284,13 +316,15 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
     const handleCreateUser = async () => {
         // Enforce required validation on all form fields except password
         if (!lguForm.full_name || !lguForm.email || !lguForm.role) {
-            dialogs.alert("Validation", "Please fill in all required fields: Full Name, Email, and Role.", 'warning');
+            setErrorMessage("Please fill in all required fields marked with *");
+            setShowErrorModal(true);
             return;
         }
 
         // Location is required for all roles except super_admin
         if (lguForm.role !== 'super_admin' && !lguForm.barangay) {
-            dialogs.alert("Validation", "Please select a Location (Sitio) for this account.", 'warning');
+            setErrorMessage("Please fill in all required fields marked with *");
+            setShowErrorModal(true);
             return;
         }
 
@@ -318,15 +352,18 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
 
             if (response.ok) {
                 setCreatedUserEmail(lguForm.email);
+                setSuccessMessage(`Successfully created account for ${lguForm.full_name}. Verification link and default password sent.`);
                 setShowAddLGUModal(false);
                 setShowSuccessModal(true);
                 setLguForm({ full_name: "", email: "", role: "lgu_admin", barangay: "", password: "" });
                 fetchUsers();
             } else {
-                dialogs.error("Error", "Error: " + (data.error || "Failed to create account"));
+                setErrorMessage(data.error || "Failed to create account");
+                setShowErrorModal(true);
             }
         } catch (error) {
-            dialogs.error("Error", "Network error creating user");
+            setErrorMessage("Network error creating user");
+            setShowErrorModal(true);
         } finally {
             setIsSubmitting(false);
         }
@@ -527,7 +564,7 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                                                     </View>
                                                     <TouchableOpacity
                                                         style={[styles.userActionButton, { backgroundColor: '#ffffff', borderColor: '#e2e8f0' }]}
-                                                        onPress={() => handleDeleteUser(user.id)}
+                                                        onPress={() => handleDeleteUser(user)}
                                                     >
                                                         <Feather name="trash-2" size={16} color="#dc2626" />
                                                     </TouchableOpacity>
@@ -542,7 +579,7 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                                                     </TouchableOpacity>
                                                     <TouchableOpacity
                                                         style={[styles.userActionButton, { backgroundColor: '#ffffff', borderColor: '#e2e8f0' }]}
-                                                        onPress={() => handleDeleteUser(user.id)}
+                                                        onPress={() => handleDeleteUser(user)}
                                                     >
                                                         <Feather name="trash-2" size={16} color="#dc2626" />
                                                     </TouchableOpacity>
@@ -557,117 +594,113 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
 
                 </ScrollView>
 
-                {/* Add LGU Modal (Redesigned) */}
-                {showAddLGUModal && (
-                    <View style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", zIndex: 1000 }}>
-                        <View style={{ width: 500, backgroundColor: "#fff", borderRadius: 16, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 10, elevation: 10 }}>
-                            {/* Gradient Header */}
-                            <LinearGradient
-                                colors={["#4c669f", "#3b5998", "#192f6a"]} 
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 0 }}
-                                style={{
-                                    padding: 16,
-                                    flexDirection: "row",
-                                    justifyContent: "space-between",
-                                    alignItems: "center",
-                                    borderTopLeftRadius: 20,
-                                    borderTopRightRadius: 20
-                                }}
-                            >
-                                <View style={{ flexDirection: "row", alignItems: "center" }}>
-                                    <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.2)", justifyContent: "center", alignItems: "center", marginRight: 12 }}>
-                                        <Feather name="user-plus" size={20} color="#fff" />
-                                    </View>
-                                    <View>
-                                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#fff" }}>Add New User</Text>
-                                        <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.8)" }}>Create a new account</Text>
-                                    </View>
-                                </View>
+                {/* Add User Modal */}
+                <Modal visible={showAddLGUModal} transparent animationType="fade">
+                    <View style={pg.modalOverlay}>
+                        <View style={pg.modalBox}>
+                            <LinearGradient colors={["#001D39", "#0A4174"]} style={pg.modalHeader}>
+                                <Text style={pg.modalTitle}>Add New User</Text>
                                 <TouchableOpacity onPress={() => setShowAddLGUModal(false)}>
-                                    <Feather name="x" size={24} color="#fff" />
+                                    <Feather name="x" size={22} color="#fff" />
                                 </TouchableOpacity>
                             </LinearGradient>
 
-                            {/* Modal Body */}
-                            <View style={{ padding: 24 }}>
-                                {/* Full Name */}
-                                <Text style={{ fontSize: 13, fontFamily: "Poppins_600SemiBold", color: "#334155", marginBottom: 8 }}>Full Name <Text style={{ color: "#dc2626" }}>*</Text></Text>
-                                <View style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, paddingHorizontal: 12, marginBottom: 16, height: 44 }}>
-                                    <Feather name="user" size={18} color="#94a3b8" style={{ marginRight: 8 }} />
-                                    <TextInput
-                                        style={{ flex: 1, fontSize: 14, color: "#0f172a", outlineStyle: 'none' }}
-                                        placeholder="Enter full name"
-                                        placeholderTextColor="#94a3b8"
-                                        value={lguForm.full_name}
-                                        onChangeText={(text) => setLguForm({ ...lguForm, full_name: text })}
-                                    />
+                            <ScrollView style={pg.modalBody} showsVerticalScrollIndicator={false}>
+                                <View style={pg.formGrid}>
+                                    <View style={pg.formGroup}>
+                                        <Text style={pg.formLabel}>Full Name <Text style={{ color: "#dc2626" }}>*</Text></Text>
+                                        <TextInput 
+                                            style={pg.formInput} 
+                                            placeholder="Enter full name" 
+                                            placeholderTextColor="#94a3b8"
+                                            value={lguForm.full_name} 
+                                            onChangeText={(text) => setLguForm({ ...lguForm, full_name: text })} 
+                                        />
+                                    </View>
+                                    <View style={pg.formGroup}>
+                                        <Text style={pg.formLabel}>Email Address <Text style={{ color: "#dc2626" }}>*</Text></Text>
+                                        <TextInput 
+                                            style={pg.formInput} 
+                                            placeholder="Enter email address" 
+                                            placeholderTextColor="#94a3b8"
+                                            value={lguForm.email} 
+                                            onChangeText={(text) => setLguForm({ ...lguForm, email: text })} 
+                                        />
+                                    </View>
                                 </View>
 
-                                {/* Email Address */}
-                                <Text style={{ fontSize: 13, fontFamily: "Poppins_600SemiBold", color: "#334155", marginBottom: 8 }}>Email Address <Text style={{ color: "#dc2626" }}>*</Text></Text>
-                                <View style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, paddingHorizontal: 12, marginBottom: 16, height: 44 }}>
-                                    <Feather name="mail" size={18} color="#94a3b8" style={{ marginRight: 8 }} />
-                                    <TextInput
-                                        style={{ flex: 1, fontSize: 14, color: "#0f172a", outlineStyle: 'none' }}
-                                        placeholder="Enter email address"
-                                        placeholderTextColor="#94a3b8"
-                                        value={lguForm.email}
-                                        onChangeText={(text) => setLguForm({ ...lguForm, email: text })}
-                                    />
+                                <View style={pg.formGroup}>
+                                    <Text style={pg.formLabel}>Account Role <Text style={{ color: "#dc2626" }}>*</Text></Text>
+                                    <View style={{ flexDirection: "row", gap: 8 }}>
+                                        {[
+                                            { label: "User", value: "user", color: "#2563eb", bg: "#eff6ff" },
+                                            { label: "LGU", value: "lgu_admin", color: "#7c3aed", bg: "#f3e8ff" },
+                                            { label: "Admin", value: "super_admin", color: "#dc2626", bg: "#fee2e2" }
+                                        ].map((role) => (
+                                            <TouchableOpacity
+                                                key={role.value}
+                                                style={{ 
+                                                    flex: 1, 
+                                                    flexDirection: "row", 
+                                                    alignItems: "center", 
+                                                    justifyContent: "center", 
+                                                    padding: 10, 
+                                                    borderWidth: 1.5, 
+                                                    borderColor: lguForm.role === role.value ? role.color : "#e2e8f0", 
+                                                    borderRadius: 12, 
+                                                    backgroundColor: lguForm.role === role.value ? role.bg : "#f8fafc" 
+                                                }}
+                                                onPress={() => setLguForm({ ...lguForm, role: role.value })}
+                                            >
+                                                <Text style={{ 
+                                                    fontSize: 13, 
+                                                    color: lguForm.role === role.value ? "#1e293b" : "#64748b", 
+                                                    fontFamily: lguForm.role === role.value ? "Poppins_600SemiBold" : "Poppins_400Regular" 
+                                                }}>{role.label}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
                                 </View>
 
-                                {/* Role Selection */}
-                                <Text style={{ fontSize: 13, fontFamily: "Poppins_600SemiBold", color: "#334155", marginBottom: 8 }}>Account Role <Text style={{ color: "#dc2626" }}>*</Text></Text>
-                                <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
-                                    <TouchableOpacity
-                                        style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 8, borderWidth: 1, borderColor: lguForm.role === 'user' ? "#2563eb" : "#e2e8f0", borderRadius: 8, backgroundColor: lguForm.role === 'user' ? "#eff6ff" : "#fff" }}
-                                        onPress={() => setLguForm({ ...lguForm, role: 'user' })}
-                                    >
-                                        <Text style={{ fontSize: 13, color: lguForm.role === 'user' ? "#1e293b" : "#64748b", fontFamily: lguForm.role === 'user' ? "Poppins_600SemiBold" : "Poppins_400Regular" }}>User</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 8, borderWidth: 1, borderColor: lguForm.role === 'lgu_admin' ? "#7c3aed" : "#e2e8f0", borderRadius: 8, backgroundColor: lguForm.role === 'lgu_admin' ? "#f3e8ff" : "#fff" }}
-                                        onPress={() => setLguForm({ ...lguForm, role: 'lgu_admin' })}
-                                    >
-                                        <Text style={{ fontSize: 13, color: lguForm.role === 'lgu_admin' ? "#1e293b" : "#64748b", fontFamily: lguForm.role === 'lgu_admin' ? "Poppins_600SemiBold" : "Poppins_400Regular" }}>LGU</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", padding: 8, borderWidth: 1, borderColor: lguForm.role === 'super_admin' ? "#dc2626" : "#e2e8f0", borderRadius: 8, backgroundColor: lguForm.role === 'super_admin' ? "#fee2e2" : "#fff" }}
-                                        onPress={() => setLguForm({ ...lguForm, role: 'super_admin' })}
-                                    >
-                                        <Text style={{ fontSize: 13, color: lguForm.role === 'super_admin' ? "#1e293b" : "#64748b", fontFamily: lguForm.role === 'super_admin' ? "Poppins_600SemiBold" : "Poppins_400Regular" }}>Admin</Text>
-                                    </TouchableOpacity>
-                                </View>
-
-                                {/* Location (Sitio) - Only for LGUs/Users */}
                                 {lguForm.role !== 'super_admin' && (
-                                    <View style={{ marginBottom: 16, zIndex: 100 }}>
-                                        <Text style={{ fontSize: 13, fontFamily: "Poppins_600SemiBold", color: "#334155", marginBottom: 8 }}>Location (Sitio) <Text style={{ color: "#dc2626" }}>*</Text></Text>
+                                    <View style={pg.formGroup}>
+                                        <Text style={pg.formLabel}>Location (Sitio) <Text style={{ color: "#dc2626" }}>*</Text></Text>
                                         <TouchableOpacity
-                                            style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, paddingHorizontal: 12, height: 44, backgroundColor: "#fff" }}
+                                            style={[pg.formInput, { flexDirection: "row", justifyContent: "space-between", alignItems: "center" }]}
                                             onPress={() => setShowSitioDropdown(!showSitioDropdown)}
                                         >
-                                            <Feather name="map-pin" size={18} color="#94a3b8" style={{ marginRight: 8 }} />
-                                            <Text style={{ flex: 1, fontSize: 14, color: lguForm.barangay ? "#0f172a" : "#94a3b8" }}>
+                                            <Text style={{ color: lguForm.barangay ? "#0f172a" : "#94a3b8" }}>
                                                 {lguForm.barangay || "Select Sitio"}
                                             </Text>
                                             <Feather name={showSitioDropdown ? "chevron-up" : "chevron-down"} size={18} color="#94a3b8" />
                                         </TouchableOpacity>
 
                                         {showSitioDropdown && (
-                                            <View style={{ position: "absolute", top: 50, left: 0, right: 0, backgroundColor: "#fff", borderRadius: 8, borderWidth: 1, borderColor: "#e2e8f0", shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 4, elevation: 5, maxHeight: 150, zIndex: 5000 }}>
-                                                <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }}>
+                                            <View style={{ 
+                                                marginTop: 8,
+                                                backgroundColor: "#fff", 
+                                                borderRadius: 12, 
+                                                borderWidth: 1, 
+                                                borderColor: "#e2e8f0", 
+                                                overflow: 'hidden',
+                                                maxHeight: 180,
+                                            }}>
+                                                <ScrollView nestedScrollEnabled={true}>
                                                     {availableLocations.map((sitio, index) => (
                                                         <TouchableOpacity
                                                             key={index}
-                                                            style={{ paddingVertical: 8, paddingHorizontal: 12, borderBottomWidth: index === availableLocations.length - 1 ? 0 : 1, borderBottomColor: "#f1f5f9" }}
+                                                            style={{ 
+                                                                paddingVertical: 12, 
+                                                                paddingHorizontal: 16, 
+                                                                borderBottomWidth: index === availableLocations.length - 1 ? 0 : 1, 
+                                                                borderBottomColor: "#f1f5f9" 
+                                                            }}
                                                             onPress={() => {
                                                                 setLguForm({ ...lguForm, barangay: sitio });
                                                                 setShowSitioDropdown(false);
                                                             }}
                                                         >
-                                                            <Text style={{ fontSize: 14, color: "#0f172a" }}>{sitio}</Text>
+                                                            <Text style={{ fontSize: 14, color: "#0f172a", fontFamily: "Poppins_400Regular" }}>{sitio}</Text>
                                                         </TouchableOpacity>
                                                     ))}
                                                 </ScrollView>
@@ -676,50 +709,39 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                                     </View>
                                 )}
 
-                                {/* Password */}
-                                <Text style={{ fontSize: 13, fontFamily: "Poppins_600SemiBold", color: "#334155", marginBottom: 8 }}>
-                                    Password (Optional - auto-generated if empty)
-                                </Text>
-                                <View style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, paddingHorizontal: 12, marginBottom: 24, height: 44 }}>
-                                    <Feather name="lock" size={18} color="#94a3b8" style={{ marginRight: 8 }} />
-                                    <TextInput
-                                        style={{ flex: 1, fontSize: 14, color: "#0f172a", outlineStyle: 'none' }}
-                                        placeholder="Leave blank to auto-generate"
+                                <View style={pg.formGroup}>
+                                    <Text style={pg.formLabel}>Password <Text style={{ fontSize: 11, color: "#94a3b8", fontFamily: "Poppins_400Regular" }}>(Optional - auto-generated if empty)</Text></Text>
+                                    <TextInput 
+                                        style={pg.formInput} 
+                                        placeholder="Leave blank to auto-generate" 
                                         placeholderTextColor="#94a3b8"
                                         secureTextEntry={true}
-                                        value={lguForm.password}
-                                        onChangeText={(text) => setLguForm({ ...lguForm, password: text })}
+                                        value={lguForm.password} 
+                                        onChangeText={(text) => setLguForm({ ...lguForm, password: text })} 
                                     />
                                 </View>
+                            </ScrollView>
 
-                                {/* Create Button */}
-                                <TouchableOpacity
-                                    onPress={handleCreateUser}
+                            <View style={pg.modalFooter}>
+                                <TouchableOpacity style={pg.cancelBtn} onPress={() => setShowAddLGUModal(false)}>
+                                    <Text style={pg.cancelBtnText}>Cancel</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity 
+                                    style={pg.submitBtn} 
+                                    onPress={handleCreateUser} 
                                     disabled={isSubmitting}
-                                    style={{ opacity: isSubmitting ? 0.7 : 1 }}
                                 >
-                                    <LinearGradient
-                                        colors={["#6366f1", "#a855f7"]}
-                                        start={{ x: 0, y: 0 }}
-                                        end={{ x: 1, y: 0 }}
-                                        style={{ borderRadius: 16, paddingVertical: 12, alignItems: "center" }}
-                                    >
-                                        <View style={{ flexDirection: "row", alignItems: "center" }}>
-                                            {isSubmitting ? (
-                                                <Text style={{ fontSize: 15, fontFamily: "Poppins_700Bold", color: "#fff" }}>Processing...</Text>
-                                            ) : (
-                                                <>
-                                                    <Feather name="plus" size={18} color="#fff" style={{ marginRight: 8 }} />
-                                                    <Text style={{ fontSize: 15, fontFamily: "Poppins_700Bold", color: "#fff" }}>Create Account</Text>
-                                                </>
-                                            )}
-                                        </View>
-                                    </LinearGradient>
+                                    {isSubmitting ? <ActivityIndicator size="small" color="#fff" /> : (
+                                        <>
+                                            <Feather name="check" size={16} color="#fff" style={{ marginRight: 4 }} />
+                                            <Text style={pg.submitBtnText}>Create Account</Text>
+                                        </>
+                                    )}
                                 </TouchableOpacity>
                             </View>
                         </View>
                     </View>
-                )}
+                </Modal>
 
                 {/* Edit User Modal */}
                 {showEditUserModal && (
@@ -888,60 +910,66 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                     </View>
                 )}
 
-                {/* Email Verification / Success Modal */}
-                {showSuccessModal && (
-                    <View style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", zIndex: 2000 }}>
-                        <View style={{ width: 800, flexDirection: 'row', backgroundColor: "#fff", borderRadius: 12, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 20, elevation: 15, overflow: 'hidden' }}>
-
-                            {/* Left Column - Success Message */}
-                            <View style={{ flex: 1, backgroundColor: '#f8fafc', padding: 32, justifyContent: 'center', position: 'relative' }}>
-                                <View style={{ position: 'absolute', opacity: 0.05, right: -20, bottom: -20 }}>
-                                    <Feather name="shield" size={150} color="#000" />
-                                </View>
-
-                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24 }}>
-                                    <Image source={require('../../assets/logo.png')} style={{ width: 40, height: 40, marginRight: 12 }} />
-                                    <Text style={{ fontSize: 24, fontFamily: "Poppins_700Bold", color: '#0f172a' }}>FloodGuard</Text>
-                                </View>
-
-                                <Text style={{ fontSize: 32, fontFamily: "Poppins_700Bold", color: '#0f172a', marginBottom: 16 }}>Success!</Text>
-                                <Text style={{ fontSize: 16, color: '#64748b', lineHeight: 24 }}>
-                                    The new account has been successfully created. They can now log in to the system and help keep the community safe.
-                                </Text>
+                {/* Success Modal */}
+                <Modal visible={showSuccessModal} transparent animationType="fade">
+                    <View style={[pg.modalOverlay, { zIndex: 10000 }]}>
+                        <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                            <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#dcfce7", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                                <Feather name="check-circle" size={32} color="#16a34a" />
                             </View>
-
-                            {/* Right Column - Verification Status */}
-                            <View style={{ flex: 1, backgroundColor: '#001D39', padding: 32, alignItems: 'center', justifyContent: 'center' }}>
-                                <Text style={{ fontSize: 28, fontFamily: "Poppins_700Bold", color: '#ffffff', marginBottom: 32 }}>Verify Email</Text>
-
-                                {/* Envelope Icon */}
-                                <View style={{ width: 100, height: 70, backgroundColor: '#ffffff', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginBottom: 32 }}>
-                                    <Feather name="mail" size={40} color="#001D39" />
-                                </View>
-
-                                <Text style={{ fontSize: 16, color: '#e2e8f0', textAlign: 'center', marginBottom: 8 }}>
-                                    Email verification has been sent to
-                                </Text>
-                                <Text style={{ fontSize: 16, fontFamily: "Poppins_700Bold", color: '#ffffff', textAlign: 'center', marginBottom: 24 }}>
-                                    {createdUserEmail}
-                                </Text>
-
-                                <Text style={{ fontSize: 14, color: '#94a3b8', textAlign: 'center', marginBottom: 32 }}>
-                                    Verification link and default password have been sent to the email.
-                                </Text>
-
-                                {/* Action Buttons */}
-                                <TouchableOpacity
-                                    style={{ width: '100%', backgroundColor: '#BDD8E9', paddingVertical: 12, borderRadius: 8, alignItems: 'center' }}
-                                    onPress={() => setShowSuccessModal(false)}
-                                >
-                                    <Text style={{ color: '#0A4174', fontSize: 15, fontFamily: "Poppins_700Bold" }}>Done</Text>
-                                </TouchableOpacity>
-                            </View>
-
+                            <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8, textAlign: "center" }}>Success!</Text>
+                            <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>{successMessage}</Text>
+                            <TouchableOpacity style={pg.submitBtn} onPress={() => setShowSuccessModal(false)}>
+                                <Text style={pg.submitBtnText}>Done</Text>
+                            </TouchableOpacity>
                         </View>
                     </View>
-                )}
+                </Modal>
+
+                {/* Delete Confirmation Modal */}
+                <Modal visible={showDeleteModal} transparent animationType="fade">
+                    <View style={[pg.modalOverlay, { zIndex: 10000 }]}>
+                        <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                            <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#fee2e2", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                                <Feather name="trash-2" size={32} color="#dc2626" />
+                            </View>
+                            <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8, textAlign: "center" }}>Delete User?</Text>
+                            <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>
+                                Are you sure you want to delete <Text style={{ fontFamily: "Poppins_600SemiBold", color: "#0f172a" }}>{userToDelete?.name || "this user"}</Text>? This action cannot be undone.
+                            </Text>
+                            <View style={{ flexDirection: "row", gap: 12, width: "100%" }}>
+                                <TouchableOpacity style={[pg.cancelBtn, { flex: 1 }]} onPress={cancelDelete}>
+                                    <Text style={pg.cancelBtnText}>Cancel</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity 
+                                    style={[pg.submitBtn, { flex: 1, backgroundColor: "#dc2626" }]} 
+                                    onPress={confirmDelete}
+                                    disabled={isSubmitting}
+                                >
+                                    {isSubmitting ? <ActivityIndicator size="small" color="#fff" /> : (
+                                        <Text style={pg.submitBtnText}>Delete</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </Modal>
+
+                {/* Error Modal */}
+                <Modal visible={showErrorModal} transparent animationType="fade">
+                    <View style={[pg.modalOverlay, { zIndex: 10000 }]}>
+                        <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                            <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#fee2e2", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                                <Feather name="alert-circle" size={32} color="#dc2626" />
+                            </View>
+                            <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8 }}>Error</Text>
+                            <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>{errorMessage}</Text>
+                            <TouchableOpacity style={[pg.submitBtn, { backgroundColor: "#dc2626" }]} onPress={() => setShowErrorModal(false)}>
+                                <Text style={pg.submitBtnText}>Close</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </Modal>
             </>
         </View>
     </View>
@@ -1079,5 +1107,21 @@ const pg = {
         color: "#ffffff",
         fontSize: 14,
         fontFamily: "Poppins_600SemiBold",
-    }
+    },
+    // Modal
+    modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center", padding: 16 },
+    modalBox: { backgroundColor: "#fff", borderRadius: 16, overflow: "hidden", width: "100%", maxWidth: 680, maxHeight: "90%", boxShadow: "0px 8px 24px rgba(0, 0, 0, 0.2)", elevation: 10 },
+    modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 24 },
+    modalTitle: { fontSize: 18, fontFamily: "Poppins_700Bold", color: "#fff" },
+    modalBody: { padding: 24 },
+    modalFooter: { flexDirection: "row", justifyContent: "flex-end", gap: 12, padding: 16, borderTopWidth: 1, borderTopColor: "#f1f5f9" },
+    // Form
+    formGrid: { flexDirection: "row", gap: 16 },
+    formGroup: { flex: 1, marginBottom: 16 },
+    formLabel: { fontSize: 13, fontFamily: "Poppins_600SemiBold", color: "#374151", marginBottom: 4 },
+    formInput: { borderWidth: 1.5, borderColor: "#e2e8f0", borderRadius: 16, paddingHorizontal: 12, paddingVertical: 12, fontSize: 14, fontFamily: "Poppins_400Regular", color: "#0f172a", backgroundColor: "#f8fafc", outlineStyle: "none" },
+    cancelBtn: { paddingVertical: 12, paddingHorizontal: 24, borderRadius: 16, borderWidth: 1.5, borderColor: "#e2e8f0" },
+    cancelBtnText: { fontSize: 14, fontFamily: "Poppins_600SemiBold", color: "#475569" },
+    submitBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", backgroundColor: "#3b82f6", borderRadius: 16, paddingVertical: 12, paddingHorizontal: 24 },
+    submitBtnText: { fontSize: 14, fontFamily: "Poppins_600SemiBold", color: "#fff" },
 };

@@ -893,19 +893,19 @@ const criticalSensors = liveSensors.filter(s => s.is_live && s.enabled && (s.rea
                         <ScrollView style={pg.modalBody} showsVerticalScrollIndicator={false}>
                             <View style={pg.formGrid}>
                                 <View style={pg.formGroup}>
-                                    <Text style={pg.formLabel}>Sensor ID *</Text>
+                                    <Text style={pg.formLabel}>Sensor ID <Text style={{ color: "#dc2626" }}>*</Text></Text>
                                     <TextInput style={pg.formInput} placeholder="e.g., SENSOR-001" placeholderTextColor="#94a3b8"
                                         value={formData.id} onChangeText={v => handleInputChange("id", v)} />
                                 </View>
                                 <View style={pg.formGroup}>
-                                    <Text style={pg.formLabel}>Sensor Name *</Text>
+                                    <Text style={pg.formLabel}>Sensor Name <Text style={{ color: "#dc2626" }}>*</Text></Text>
                                     <TextInput style={pg.formInput} placeholder="e.g., Main Canal Sensor" placeholderTextColor="#94a3b8"
                                         value={formData.name} onChangeText={v => handleInputChange("name", v)} />
                                 </View>
                             </View>
 
                             <View style={pg.formGroup}>
-                                <Text style={pg.formLabel}>Barangay *</Text>
+                                <Text style={pg.formLabel}>Barangay <Text style={{ color: "#dc2626" }}>*</Text></Text>
                                 <TextInput style={pg.formInput} placeholder="e.g., San Jose, Mabolo" placeholderTextColor="#94a3b8"
                                     value={formData.barangay} onChangeText={v => handleInputChange("barangay", v)} />
                             </View>
@@ -920,12 +920,12 @@ const criticalSensors = liveSensors.filter(s => s.is_live && s.enabled && (s.rea
 
                             <View style={pg.formGrid}>
                                 <View style={pg.formGroup}>
-                                    <Text style={pg.formLabel}>Latitude *</Text>
+                                    <Text style={pg.formLabel}>Latitude <Text style={{ color: "#dc2626" }}>*</Text></Text>
                                     <TextInput style={pg.formInput} placeholder="e.g., 10.3157" placeholderTextColor="#94a3b8"
                                         keyboardType="numeric" value={formData.lat} onChangeText={v => handleInputChange("lat", v)} />
                                 </View>
                                 <View style={pg.formGroup}>
-                                    <Text style={pg.formLabel}>Longitude *</Text>
+                                    <Text style={pg.formLabel}>Longitude <Text style={{ color: "#dc2626" }}>*</Text></Text>
                                     <TextInput style={pg.formInput} placeholder="e.g., 123.8854" placeholderTextColor="#94a3b8"
                                         keyboardType="numeric" value={formData.lng} onChangeText={v => handleInputChange("lng", v)} />
                                 </View>

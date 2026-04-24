@@ -126,6 +126,9 @@ def get_reports():
     
     cursor.execute(query, params)
     reports = cursor.fetchall()
+    for r in reports:
+        if r.get('timestamp'):
+            r['timestamp'] = format_pst(r['timestamp'])
     cursor.close()
     
     return jsonify(reports)
@@ -229,6 +232,9 @@ def get_pending_reports():
         ORDER BY timestamp DESC
     """)
     reports = cursor.fetchall()
+    for r in reports:
+        if r.get('timestamp'):
+            r['timestamp'] = format_pst(r['timestamp'])
     cursor.close()
     
     return jsonify(reports), 200
@@ -429,7 +435,7 @@ def reject_report(report_id):
             logger.error("Failed to send dismissal notification: %s", e)
     
     _emit_report_update()
-
+    
     return jsonify({
         "message": "Report rejected and dismissed",
         "report_id": report_id,
@@ -437,6 +443,34 @@ def reject_report(report_id):
         "rejection_reason": rejection_reason or "False alarm/Duplicate",
         "dismissed_at": now_str
     }), 200
+
+@reports_bp.route('/<int:report_id>', methods=['DELETE'])
+def delete_report(report_id):
+    """Permanently delete a report from the system."""
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        # Check if report exists
+        cursor.execute("SELECT id, image_url FROM reports WHERE id = %s", (report_id,))
+        report = cursor.fetchone()
+        
+        if not report:
+            return jsonify({"error": "Report not found"}), 404
+            
+        # Delete from DB
+        cursor.execute("DELETE FROM reports WHERE id = %s", (report_id,))
+        db.commit()
+        
+        # Note: We keep the image file for audit/backup even if record is deleted
+        # or we could delete it here if storage was an issue.
+        
+        _emit_report_update()
+        return jsonify({"message": "Report deleted successfully"}), 200
+    except Exception as e:
+        logger.error(f"Failed to delete report {report_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cursor.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

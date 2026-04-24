@@ -67,6 +67,8 @@ def get_alert(alert_id):
         alert = cursor.fetchone()
         if not alert:
             return jsonify({"error": "Alert not found"}), 404
+        if alert.get('timestamp'):
+            alert['timestamp'] = format_pst(alert['timestamp'])
         return jsonify(alert), 200
     except Exception as e:
         logger.error("Failed to fetch alert %s: %s", alert_id, e)
@@ -123,6 +125,9 @@ def get_alerts():
     try:
         cursor.execute(query, params)
         alerts = cursor.fetchall()
+        for a in alerts:
+            if a.get('timestamp'):
+                a['timestamp'] = format_pst(a['timestamp'])
         cursor.close()
         return jsonify(alerts)
     except Exception as e:
@@ -141,6 +146,9 @@ def get_alerts():
             
             cursor.execute(fallback_query, fallback_params)
             alerts = cursor.fetchall()
+            for a in alerts:
+                if a.get('timestamp'):
+                    a['timestamp'] = format_pst(a['timestamp'])
             cursor.close()
             return jsonify(alerts)
         else:

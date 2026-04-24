@@ -6,10 +6,9 @@ import { styles } from "../styles/globalStyles";
 import AdminSidebar from "../components/AdminSidebar";
 import RealTimeClock from "../components/RealTimeClock";
 import { formatPST, getSystemStatus, getSystemStatusColor } from "../utils/dateUtils";
-import { authFetch } from "../utils/helpers";
+import { authFetch, areValuesEqual } from "../utils/helpers";
 import { API_BASE_URL } from "../config/api";
 import useDataSync from "../utils/useDataSync";
-import dialogs from "../utils/dialogs";
 import TopRightStatusIndicator from "../components/TopRightStatusIndicator";
 
 const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
@@ -24,6 +23,13 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
     const [editingCenter, setEditingCenter] = useState(null);
     const [onlineSensors, setOnlineSensors] = useState(0);
 
+    const [showSuccessModal, setShowSuccessModal] = useState(false);
+    const [successMessage, setSuccessMessage] = useState("");
+    const [showErrorModal, setShowErrorModal] = useState(false);
+    const [errorMessage, setErrorMessage] = useState("");
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [centerToDelete, setCenterToDelete] = useState(null);
+
     const [form, setForm] = useState({
         name: "",
         location: "",
@@ -33,6 +39,7 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
         phone: "911",
         status: "open"
     });
+    const initialFormRef = React.useRef(null);
 
     const [currentStep, setCurrentStep] = useState(1); // 1: Pinning, 2: Details
     const [pinnedAddress, setPinnedAddress] = useState("");
@@ -189,8 +196,15 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
     }, [showAddModal, showEditModal, currentStep]);
 
     const handleCreateCenter = async () => {
-        if (!form.name || !form.location || !form.lat || !form.lng) {
-            dialogs.alert("Validation", "Please fill in Name, Location, Latitude, and Longitude", 'warning');
+        // Dynamic Validation
+        const missingFields = [];
+        if (!form.name) missingFields.push("Name");
+        if (!form.capacity || form.capacity === "0") missingFields.push("Capacity");
+        if (!form.status) missingFields.push("Status");
+
+        if (missingFields.length > 0) {
+            setErrorMessage("Please fill in all required fields marked with *");
+            setShowErrorModal(true);
             return;
         }
 
@@ -206,20 +220,22 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
                     lng: parseFloat(form.lng)
                 })
             });
-
             if (response.ok) {
-                dialogs.success("Success", "Evacuation center added successfully");
+                setSuccessMessage(`Successfully added evacuation center: ${form.name}`);
                 setShowAddModal(false);
+                setShowSuccessModal(true);
                 setCurrentStep(1);
                 setForm({ name: "", location: "", lat: "", lng: "", capacity: "0", phone: "911", status: "open" });
                 setPinnedAddress("");
                 fetchCenters();
             } else {
                 const data = await response.json();
-                dialogs.error("Error", data.error || "Failed to add center");
+                setErrorMessage(data.error || "Failed to add center");
+                setShowErrorModal(true);
             }
         } catch (error) {
-            dialogs.error("Error", "Network error adding center");
+            setErrorMessage("Network error adding center");
+            setShowErrorModal(true);
         } finally {
             setIsSubmitting(false);
         }
@@ -227,6 +243,26 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
 
     const handleUpdateCenter = async () => {
         if (!editingCenter) return;
+
+        // Dynamic Validation
+        const missingFields = [];
+        if (!form.name) missingFields.push("Name");
+        if (!form.capacity || form.capacity === "0") missingFields.push("Capacity");
+        if (!form.status) missingFields.push("Status");
+
+        if (missingFields.length > 0) {
+            setErrorMessage("Please fill in all required fields marked with *");
+            setShowErrorModal(true);
+            return;
+        }
+
+        // "No Changes" Validation
+        if (initialFormRef.current && areValuesEqual(form, initialFormRef.current)) {
+            setErrorMessage("No changes detected.");
+            setShowErrorModal(true);
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             const response = await authFetch(`${API_BASE_URL}/api/evacuation-centers/${editingCenter.id}`, {
@@ -241,42 +277,61 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
             });
 
             if (response.ok) {
-                dialogs.success("Updated", "Evacuation center updated successfully");
+                setSuccessMessage(`Successfully updated evacuation center: ${form.name}`);
                 setShowEditModal(false);
+                setShowSuccessModal(true);
                 fetchCenters();
             } else {
                 const data = await response.json();
-                dialogs.error("Error", data.error || "Failed to update center");
+                setErrorMessage(data.error || "Failed to update center");
+                setShowErrorModal(true);
             }
         } catch (error) {
-            dialogs.error("Error", "Network error updating center");
+            setErrorMessage("Network error updating center");
+            setShowErrorModal(true);
         } finally {
             setIsSubmitting(false);
         }
     };
 
-    const handleDeleteCenter = async (id) => {
-        const result = await dialogs.confirm("Delete Center", "Are you sure you want to delete this evacuation center?");
-        if (result.isConfirmed) {
-            try {
-                const response = await authFetch(`${API_BASE_URL}/api/evacuation-centers/${id}`, {
-                    method: "DELETE"
-                });
-                if (response.ok) {
-                    dialogs.success("Deleted", "Center deleted successfully");
-                    fetchCenters();
-                } else {
-                    dialogs.error("Error", "Failed to delete center");
-                }
-            } catch (error) {
-                dialogs.error("Error", "Network error deleting center");
+    const handleDeleteCenter = async (center) => {
+        setCenterToDelete(center);
+        setShowDeleteModal(true);
+    };
+
+    const confirmDeleteCenter = async () => {
+        if (!centerToDelete) return;
+        setIsSubmitting(true);
+        try {
+            const response = await authFetch(`${API_BASE_URL}/api/evacuation-centers/${centerToDelete.id}`, {
+                method: "DELETE"
+            });
+            if (response.ok) {
+                setSuccessMessage(`Successfully deleted evacuation center: ${centerToDelete.name}`);
+                setShowDeleteModal(false);
+                setShowSuccessModal(true);
+                setCenterToDelete(null);
+                fetchCenters();
+            } else {
+                setErrorMessage("Failed to delete center");
+                setShowErrorModal(true);
             }
+        } catch (error) {
+            setErrorMessage("Network error deleting center");
+            setShowErrorModal(true);
+        } finally {
+            setIsSubmitting(false);
         }
+    };
+
+    const cancelDeleteCenter = () => {
+        setShowDeleteModal(false);
+        setCenterToDelete(null);
     };
 
     const handleEditClick = (center) => {
         setEditingCenter(center);
-        setForm({
+        const formValues = {
             name: center.name,
             location: center.location,
             lat: center.lat.toString(),
@@ -284,7 +339,9 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
             capacity: center.capacity.toString(),
             phone: center.phone || "",
             status: center.status || "open"
-        });
+        };
+        setForm(formValues);
+        initialFormRef.current = formValues;
         setCurrentStep(2); // In edit mode, allow going straight to details if needed, but we'll still show the map
         setShowEditModal(true);
     };
@@ -416,7 +473,7 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
                                                 </TouchableOpacity>
                                                 <TouchableOpacity
                                                     style={[styles.userActionButton, { backgroundColor: '#ffffff', borderColor: '#e2e8f0' }]}
-                                                    onPress={() => handleDeleteCenter(center.id)}
+                                                    onPress={() => handleDeleteCenter(center)}
                                                 >
                                                     <Feather name="trash-2" size={16} color="#dc2626" />
                                                 </TouchableOpacity>
@@ -431,146 +488,235 @@ const EvacuationManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) =>
             </View>
 
             {(showAddModal || showEditModal) && (
-                <View style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", zIndex: 1000 }}>
-                    <View style={{ width: 800, backgroundColor: "#fff", borderRadius: 16, overflow: 'hidden' }}>
-                        <LinearGradient
-                            colors={["#1d4ed8", "#3b82f6"]}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 0 }}
-                            style={{ padding: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
-                        >
-                            <View>
-                                <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#fff" }}>
-                                    {showAddModal ? "Add New Evacuation Center" : "Edit Evacuation Center"}
-                                </Text>
-                                <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.8)" }}>
-                                    {currentStep === 1 ? "Step 1: Pin Exact Location" : "Step 2: Enter Facility Details"}
-                                </Text>
-                            </View>
-                            <TouchableOpacity onPress={() => { setShowAddModal(false); setShowEditModal(false); setCurrentStep(1); }}>
-                                <Feather name="x" size={24} color="#fff" />
-                            </TouchableOpacity>
-                        </LinearGradient>
-
-                        <View style={{ padding: 24 }}>
-                            {currentStep === 1 ? (
+                <Modal visible={true} transparent animationType="fade">
+                    <View style={pg.modalOverlay}>
+                        <View style={[pg.modalBox, { maxWidth: currentStep === 1 ? 800 : 680 }]}>
+                            <LinearGradient colors={["#001D39", "#0A4174"]} style={pg.modalHeader}>
                                 <View>
-                                    <Text style={{ fontSize: 14, color: "#475569", marginBottom: 16 }}>
-                                        Click on the map to pin the exact location of the evacuation center.
+                                    <Text style={pg.modalTitle}>
+                                        {showAddModal ? "Add New Evacuation Center" : "Edit Evacuation Center"}
                                     </Text>
-                                    <View
-                                        nativeID="pin-map-container"
-                                        style={{ height: 500, backgroundColor: "#f1f5f9", borderRadius: 12, marginBottom: 16, overflow: 'hidden' }}
-                                    />
-
-                                    {form.lat ? (
-                                        <View style={{ backgroundColor: "#eff6ff", padding: 16, borderRadius: 12, marginBottom: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#dbeafe' }}>
-                                            <View style={{ backgroundColor: '#2563eb', padding: 8, borderRadius: 16, marginRight: 12 }}>
-                                                <Feather name="map-pin" size={20} color="#fff" />
-                                            </View>
-                                            <View style={{ flex: 1 }}>
-                                                <Text style={{ color: "#1e40af", fontSize: 13, fontFamily: "Poppins_700Bold", marginBottom: 2 }}>
-                                                    {isReverseGeocoding ? "Fetching address..." : "Selected Location:"}
-                                                </Text>
-                                                <Text style={{ color: "#3b82f6", fontSize: 14, lineHeight: 20 }}>
-                                                    {isReverseGeocoding ? "Identifying place..." : (pinnedAddress || `${form.lat}, ${form.lng}`)}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    ) : null}
-
-                                    <TouchableOpacity
-                                        style={[modalStyles.submitBtn, { backgroundColor: !form.lat ? "#94a3b8" : "#2563eb", marginTop: 0 }]}
-                                        disabled={!form.lat}
-                                        onPress={() => setCurrentStep(2)}
-                                    >
-                                        <Text style={modalStyles.submitBtnText}>Continue to Details</Text>
-                                    </TouchableOpacity>
+                                    <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.8)", fontFamily: "Poppins_400Regular" }}>
+                                        {currentStep === 1 ? "Step 1: Pin Exact Location" : "Step 2: Enter Facility Details"}
+                                    </Text>
                                 </View>
-                            ) : (
-                                <ScrollView style={{ maxHeight: "70vh" }}>
-                                    <TouchableOpacity
-                                        onPress={() => setCurrentStep(1)}
-                                        style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16, padding: 8, backgroundColor: "#f8fafc", borderRadius: 8, alignSelf: 'flex-start' }}
-                                    >
-                                        <Feather name="arrow-left" size={14} color="#64748b" />
-                                        <Text style={{ fontSize: 13, color: "#64748b", marginLeft: 4 }}>Back to Map</Text>
-                                    </TouchableOpacity>
+                                <TouchableOpacity onPress={() => { setShowAddModal(false); setShowEditModal(false); setCurrentStep(1); }}>
+                                    <Feather name="x" size={22} color="#fff" />
+                                </TouchableOpacity>
+                            </LinearGradient>
 
-                                    <Text style={modalStyles.label}>Center Name</Text>
-                                    <TextInput
-                                        style={modalStyles.input}
-                                        placeholder="e.g. Barangay Hall Mabolo"
-                                        value={form.name}
-                                        onChangeText={(text) => setForm({ ...form, name: text })}
-                                    />
-
-                                    <Text style={modalStyles.label}>Pinned Location</Text>
-                                    <View style={[modalStyles.input, { backgroundColor: "#f8fafc", flexDirection: 'row', alignItems: 'center' }]}>
-                                        <Feather name="map-pin" size={16} color="#64748b" style={{ marginRight: 8 }} />
-                                        <Text style={{ color: "#475569", flex: 1 }} numberOfLines={2}>
-                                            {isReverseGeocoding ? "Updating location..." : (form.location || "No location pinned")}
+                            <View style={pg.modalBody}>
+                                {currentStep === 1 ? (
+                                    <View>
+                                        <Text style={{ fontSize: 14, color: "#475569", marginBottom: 16, fontFamily: "Poppins_400Regular" }}>
+                                            Click on the map to pin the exact location of the evacuation center.
                                         </Text>
-                                    </View>
+                                        <View
+                                            nativeID="pin-map-container"
+                                            style={{ height: 450, backgroundColor: "#f8fafc", borderRadius: 16, marginBottom: 16, overflow: 'hidden', borderWidth: 1, borderColor: "#e2e8f0" }}
+                                        />
 
-                                    <View style={{ flexDirection: "row", gap: 16 }}>
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={modalStyles.label}>Total Capacity</Text>
+                                        {form.lat ? (
+                                            <View style={{ backgroundColor: "#eff6ff", padding: 16, borderRadius: 12, marginBottom: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#dbeafe' }}>
+                                                <View style={{ backgroundColor: '#3b82f6', padding: 8, borderRadius: 10, marginRight: 12 }}>
+                                                    <Feather name="map-pin" size={18} color="#fff" />
+                                                </View>
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={{ color: "#1e40af", fontSize: 11, fontFamily: "Poppins_700Bold", letterSpacing: 0.5 }}>
+                                                        {isReverseGeocoding ? "IDENTIFYING LOCATION..." : "SELECTED LOCATION"}
+                                                    </Text>
+                                                    <Text style={{ color: "#3b82f6", fontSize: 14, fontFamily: "Poppins_500Medium" }}>
+                                                        {isReverseGeocoding ? "Fetching address..." : (pinnedAddress || `${form.lat}, ${form.lng}`)}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                        ) : null}
+
+                                        <TouchableOpacity
+                                            style={[pg.submitBtn, { backgroundColor: !form.lat ? "#94a3b8" : "#3b82f6" }]}
+                                            disabled={!form.lat}
+                                            onPress={() => setCurrentStep(2)}
+                                        >
+                                            <Text style={pg.submitBtnText}>Continue to Details</Text>
+                                            <Feather name="arrow-right" size={16} color="#fff" style={{ marginLeft: 8 }} />
+                                        </TouchableOpacity>
+                                    </View>
+                                ) : (
+                                    <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 500 }}>
+                                        <TouchableOpacity
+                                            onPress={() => setCurrentStep(1)}
+                                            style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16, paddingVertical: 6, paddingHorizontal: 12, backgroundColor: "#f1f5f9", borderRadius: 8, alignSelf: 'flex-start' }}
+                                        >
+                                            <Feather name="arrow-left" size={14} color="#64748b" />
+                                            <Text style={{ fontSize: 12, color: "#64748b", marginLeft: 4, fontFamily: "Poppins_600SemiBold" }}>Back to Map</Text>
+                                        </TouchableOpacity>
+
+                                        <View style={pg.formGroup}>
+                                            <Text style={pg.formLabel}>Center Name <Text style={{ color: "#dc2626" }}>*</Text></Text>
                                             <TextInput
-                                                style={modalStyles.input}
-                                                placeholder="200"
-                                                keyboardType="numeric"
-                                                value={form.capacity}
-                                                onChangeText={(text) => setForm({ ...form, capacity: text })}
+                                                style={pg.formInput}
+                                                placeholder="e.g. Barangay Hall Mabolo"
+                                                placeholderTextColor="#94a3b8"
+                                                value={form.name}
+                                                onChangeText={(text) => setForm({ ...form, name: text })}
                                             />
                                         </View>
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={modalStyles.label}>Phone Number</Text>
-                                            <TextInput
-                                                style={modalStyles.input}
-                                                placeholder="911"
-                                                keyboardType="numeric"
-                                                value={form.phone}
-                                                onChangeText={(text) => {
-                                                    const numericValue = text.replace(/[^0-9]/g, '');
-                                                    setForm({ ...form, phone: numericValue });
-                                                }}
-                                            />
-                                        </View>
-                                    </View>
 
-                                    {showEditModal && (
-                                        <View style={{ marginBottom: 16 }}>
-                                            <Text style={modalStyles.label}>Status</Text>
+                                        <View style={pg.formGroup}>
+                                            <Text style={pg.formLabel}>Pinned Location</Text>
+                                            <View style={[pg.formInput, { backgroundColor: "#f1f5f9", flexDirection: 'row', alignItems: 'center', opacity: 0.8 }]}>
+                                                <Feather name="map-pin" size={16} color="#94a3b8" style={{ marginRight: 8 }} />
+                                                <Text style={{ color: "#475569", flex: 1, fontFamily: "Poppins_400Regular" }} numberOfLines={1}>
+                                                    {form.location || "No location pinned"}
+                                                </Text>
+                                            </View>
+                                        </View>
+
+                                        <View style={pg.formGrid}>
+                                            <View style={pg.formGroup}>
+                                                <Text style={pg.formLabel}>Total Capacity <Text style={{ color: "#dc2626" }}>*</Text></Text>
+                                                <TextInput
+                                                    style={pg.formInput}
+                                                    placeholder="e.g. 200"
+                                                    placeholderTextColor="#94a3b8"
+                                                    keyboardType="numeric"
+                                                    value={form.capacity}
+                                                    onChangeText={(text) => setForm({ ...form, capacity: text })}
+                                                />
+                                            </View>
+                                            <View style={pg.formGroup}>
+                                                <Text style={pg.formLabel}>Phone Number</Text>
+                                                <TextInput
+                                                    style={pg.formInput}
+                                                    placeholder="911"
+                                                    placeholderTextColor="#94a3b8"
+                                                    keyboardType="numeric"
+                                                    value={form.phone}
+                                                    onChangeText={(text) => {
+                                                        const numericValue = text.replace(/[^0-9]/g, '');
+                                                        setForm({ ...form, phone: numericValue });
+                                                    }}
+                                                />
+                                            </View>
+                                        </View>
+
+                                        <View style={pg.formGroup}>
+                                            <Text style={pg.formLabel}>Status <Text style={{ color: "#dc2626" }}>*</Text></Text>
                                             <View style={{ flexDirection: "row", gap: 8 }}>
                                                 {["open", "full", "closed"].map(s => (
                                                     <TouchableOpacity
                                                         key={s}
-                                                        style={[modalStyles.statusBtn, form.status === s && modalStyles.statusBtnActive]}
+                                                        style={{
+                                                            flex: 1,
+                                                            padding: 10,
+                                                            borderRadius: 12,
+                                                            borderWidth: 1.5,
+                                                            borderColor: form.status === s ? (s === 'open' ? "#16a34a" : s === 'full' ? "#dc2626" : "#64748b") : "#e2e8f0",
+                                                            backgroundColor: form.status === s ? (s === 'open' ? "#dcfce7" : s === 'full' ? "#fee2e2" : "#f1f5f9") : "#f8fafc",
+                                                            alignItems: "center"
+                                                        }}
                                                         onPress={() => setForm({ ...form, status: s })}
                                                     >
-                                                        <Text style={{ color: form.status === s ? "#fff" : "#64748b", textTransform: "capitalize" }}>{s}</Text>
+                                                        <Text style={{ 
+                                                            color: form.status === s ? "#1e293b" : "#64748b", 
+                                                            fontFamily: form.status === s ? "Poppins_600SemiBold" : "Poppins_400Regular",
+                                                            textTransform: "capitalize",
+                                                            fontSize: 13
+                                                        }}>{s}</Text>
                                                     </TouchableOpacity>
                                                 ))}
                                             </View>
                                         </View>
-                                    )}
+                                    </ScrollView>
+                                )}
+                            </View>
 
+                            {currentStep === 2 && (
+                                <View style={pg.modalFooter}>
+                                    <TouchableOpacity style={pg.cancelBtn} onPress={() => { setShowAddModal(false); setShowEditModal(false); setCurrentStep(1); }}>
+                                        <Text style={pg.cancelBtnText}>Cancel</Text>
+                                    </TouchableOpacity>
                                     <TouchableOpacity
-                                        style={[modalStyles.submitBtn, { backgroundColor: isSubmitting ? "#94a3b8" : "#2563eb" }]}
+                                        style={[pg.submitBtn, { backgroundColor: isSubmitting ? "#94a3b8" : "#3b82f6" }]}
                                         disabled={isSubmitting}
                                         onPress={showAddModal ? handleCreateCenter : handleUpdateCenter}
                                     >
-                                        <Text style={modalStyles.submitBtnText}>
-                                            {isSubmitting ? "Processing..." : showAddModal ? "Create Center" : "Save Changes"}
-                                        </Text>
+                                        {isSubmitting ? <ActivityIndicator size="small" color="#fff" /> : (
+                                            <>
+                                                <Feather name="check" size={16} color="#fff" style={{ marginRight: 4 }} />
+                                                <Text style={pg.submitBtnText}>
+                                                    {showAddModal ? "Create Center" : "Save Changes"}
+                                                </Text>
+                                            </>
+                                        )}
                                     </TouchableOpacity>
-                                </ScrollView>
+                                </View>
                             )}
                         </View>
                     </View>
-                </View>
+                </Modal>
             )}
+
+            {/* Success Modal */}
+            <Modal visible={showSuccessModal} transparent animationType="fade">
+                <View style={[pg.modalOverlay, { zIndex: 10000 }]}>
+                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#dcfce7", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                            <Feather name="check-circle" size={32} color="#16a34a" />
+                        </View>
+                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8, textAlign: "center" }}>Success!</Text>
+                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>{successMessage}</Text>
+                        <TouchableOpacity style={pg.submitBtn} onPress={() => setShowSuccessModal(false)}>
+                            <Text style={pg.submitBtnText}>Done</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Delete Confirmation Modal */}
+            <Modal visible={showDeleteModal} transparent animationType="fade">
+                <View style={[pg.modalOverlay, { zIndex: 10000 }]}>
+                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#fee2e2", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                            <Feather name="trash-2" size={32} color="#dc2626" />
+                        </View>
+                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8, textAlign: "center" }}>Delete Center?</Text>
+                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>
+                            Are you sure you want to delete <Text style={{ fontFamily: "Poppins_600SemiBold", color: "#0f172a" }}>{centerToDelete?.name}</Text>? This action cannot be undone.
+                        </Text>
+                        <View style={{ flexDirection: "row", gap: 12, width: "100%" }}>
+                            <TouchableOpacity style={[pg.cancelBtn, { flex: 1 }]} onPress={cancelDeleteCenter}>
+                                <Text style={pg.cancelBtnText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={[pg.submitBtn, { flex: 1, backgroundColor: "#dc2626" }]} 
+                                onPress={confirmDeleteCenter}
+                                disabled={isSubmitting}
+                            >
+                                {isSubmitting ? <ActivityIndicator size="small" color="#fff" /> : (
+                                    <Text style={pg.submitBtnText}>Delete</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Error Modal */}
+            <Modal visible={showErrorModal} transparent animationType="fade">
+                <View style={[pg.modalOverlay, { zIndex: 10000 }]}>
+                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#fee2e2", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                            <Feather name="alert-circle" size={32} color="#dc2626" />
+                        </View>
+                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8 }}>Error</Text>
+                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>{errorMessage}</Text>
+                        <TouchableOpacity style={[pg.submitBtn, { backgroundColor: "#dc2626" }]} onPress={() => setShowErrorModal(false)}>
+                            <Text style={pg.submitBtnText}>Close</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 };
@@ -582,6 +728,24 @@ const modalStyles = {
     submitBtnText: { color: "#fff", fontSize: 16, fontFamily: "Poppins_700Bold" },
     statusBtn: { flex: 1, padding: 8, borderRadius: 8, borderWidth: 1, borderColor: "#e2e8f0", alignItems: "center" },
     statusBtnActive: { backgroundColor: "#2563eb", borderColor: "#2563eb" }
+};
+
+const pg = {
+    modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center", padding: 16 },
+    modalBox: { backgroundColor: "#fff", borderRadius: 16, overflow: "hidden", width: "100%", maxWidth: 680, maxHeight: "90%", boxShadow: "0px 8px 24px rgba(0, 0, 0, 0.2)", elevation: 10 },
+    modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 24 },
+    modalTitle: { fontSize: 18, fontFamily: "Poppins_700Bold", color: "#fff" },
+    modalBody: { padding: 24 },
+    modalFooter: { flexDirection: "row", justifyContent: "flex-end", gap: 12, padding: 16, borderTopWidth: 1, borderTopColor: "#f1f5f9" },
+    // Form
+    formGrid: { flexDirection: "row", gap: 16 },
+    formGroup: { flex: 1, marginBottom: 16 },
+    formLabel: { fontSize: 13, fontFamily: "Poppins_600SemiBold", color: "#374151", marginBottom: 4 },
+    formInput: { borderWidth: 1.5, borderColor: "#e2e8f0", borderRadius: 16, paddingHorizontal: 12, paddingVertical: 12, fontSize: 14, fontFamily: "Poppins_400Regular", color: "#0f172a", backgroundColor: "#f8fafc", outlineStyle: "none" },
+    cancelBtn: { paddingVertical: 12, paddingHorizontal: 24, borderRadius: 16, borderWidth: 1.5, borderColor: "#e2e8f0" },
+    cancelBtnText: { fontSize: 14, fontFamily: "Poppins_600SemiBold", color: "#475569" },
+    submitBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", backgroundColor: "#3b82f6", borderRadius: 16, paddingVertical: 12, paddingHorizontal: 24 },
+    submitBtnText: { fontSize: 14, fontFamily: "Poppins_600SemiBold", color: "#fff" },
 };
 
 export default EvacuationManagementPage;

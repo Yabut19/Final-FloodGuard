@@ -32,6 +32,13 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     const [hoveredTab, setHoveredTab] = useState(null);
     const [hoveredItem, setHoveredItem] = useState(null);
     const [selectedImage, setSelectedImage] = useState(null);
+    const [showSuccessModal, setShowSuccessModal] = useState(false);
+    const [successMessage, setSuccessMessage] = useState("");
+    const [showErrorModal, setShowErrorModal] = useState(false);
+    const [errorMessage, setErrorMessage] = useState("");
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [reportToDelete, setReportToDelete] = useState(null);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     // ── Navigation & Filtering State ──────────────────────────
     const [activeCategory, setActiveCategory] = useState("flood"); // "flood" or "reports"
@@ -401,6 +408,55 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
         document.body.removeChild(element);
     };
 
+    const handleDeleteReport = (report) => {
+        setReportToDelete(report);
+        setShowDeleteModal(true);
+    };
+
+    const confirmDeleteReport = async () => {
+        if (!reportToDelete) return;
+        setIsSubmitting(true);
+        try {
+            const reportName = reportToDelete.reporter_name; // Preserve for success message
+            const response = await authFetch(`${API_BASE_URL}/api/reports/${reportToDelete.id}`, {
+                method: "DELETE"
+            });
+            
+            if (response.ok) {
+                // First, close the confirmation modal to ensure it's gone before the success modal appears
+                setShowDeleteModal(false);
+                
+                // Wait for the confirmation modal to finish its fade-out animation 
+                // before triggering the success modal to prevent UI overlap/shadowing.
+                // Increased to 500ms to ensure full unmounting in all environments.
+                setTimeout(() => {
+                    setSuccessMessage(`Successfully deleted report from: ${reportName}`);
+                    setShowSuccessModal(true);
+                    setReportToDelete(null); // Clear reference after sequence completes
+                }, 500); 
+                
+                fetchData(); // Refresh list
+            } else {
+                const err = await response.json();
+                setErrorMessage(err.error || "Failed to delete report");
+                
+                // Close confirmation modal before showing error to prevent overlap
+                setShowDeleteModal(false);
+                setTimeout(() => {
+                    setShowErrorModal(true);
+                }, 500);
+            }
+        } catch (error) {
+            setErrorMessage("Network error deleting report");
+            setShowDeleteModal(false);
+            setTimeout(() => {
+                setShowErrorModal(true);
+            }, 350);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     // Filtered Reports Logic
     const filteredReports = communityReports.filter(report => {
         const matchesStatus = statusFilter === "All Status" || report.status?.toLowerCase() === statusFilter.toLowerCase();
@@ -688,6 +744,12 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                                         <Feather name="file-text" size={14} color="#fff" />
                                                         <Text style={[pg.dlBtnText, { color: "#fff" }]}>Download PDF Report</Text>
                                                     </TouchableOpacity>
+                                                    <TouchableOpacity 
+                                                        style={[pg.dlBtn, { backgroundColor: "#ffffff", borderColor: "#fee2e2", width: 36, height: 36, paddingHorizontal: 0, justifyContent: 'center' }]} 
+                                                        onPress={() => handleDeleteReport(report)}
+                                                    >
+                                                        <Feather name="trash-2" size={16} color="#dc2626" />
+                                                    </TouchableOpacity>
                                                 </View>
                                             </View>
                                         </View>
@@ -715,6 +777,67 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                         style={{ maxWidth: "100%", maxHeight: "85%", borderRadius: 12, objectFit: "contain" }}
                         alt="Full View"
                     />
+                </View>
+            </Modal>
+
+            {/* Success Modal */}
+            <Modal visible={showSuccessModal} transparent animationType="fade">
+                <View style={pg.modalOverlay}>
+                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#dcfce7", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                            <Feather name="check-circle" size={32} color="#16a34a" />
+                        </View>
+                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8, textAlign: "center" }}>Report Deleted!</Text>
+                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>{successMessage}</Text>
+                        <TouchableOpacity style={pg.submitBtn} onPress={() => setShowSuccessModal(false)}>
+                            <Text style={pg.submitBtnText}>Done</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Delete Confirmation Modal */}
+            <Modal visible={showDeleteModal} transparent animationType="fade">
+                <View style={pg.modalOverlay}>
+                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#fee2e2", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                            <Feather name="trash-2" size={32} color="#dc2626" />
+                        </View>
+                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8, textAlign: "center" }}>Delete this Report?</Text>
+                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>
+                            Are you sure you want to delete the report from <Text style={{ fontFamily: "Poppins_600SemiBold", color: "#0f172a" }}>{reportToDelete?.reporter_name || "this user"}</Text>? This action cannot be undone.
+                        </Text>
+                        <View style={{ flexDirection: "row", gap: 12, width: "100%" }}>
+                            <TouchableOpacity style={[pg.cancelBtn, { flex: 1 }]} onPress={() => setShowDeleteModal(false)}>
+                                <Text style={pg.cancelBtnText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={[pg.submitBtn, { flex: 1, backgroundColor: "#dc2626" }]} 
+                                onPress={confirmDeleteReport}
+                                disabled={isSubmitting}
+                            >
+                                {isSubmitting ? <ActivityIndicator size="small" color="#fff" /> : (
+                                    <Text style={pg.submitBtnText}>Delete</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Error Modal */}
+            <Modal visible={showErrorModal} transparent animationType="fade">
+                <View style={pg.modalOverlay}>
+                    <View style={[pg.modalBox, { maxWidth: 400, padding: 32, alignItems: "center" }]}>
+                        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: "#fee2e2", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+                            <Feather name="alert-circle" size={32} color="#dc2626" />
+                        </View>
+                        <Text style={{ fontSize: 18, fontFamily: "Poppins_700Bold", color: "#0f172a", marginBottom: 8 }}>Error</Text>
+                        <Text style={{ fontSize: 14, fontFamily: "Poppins_400Regular", color: "#64748b", textAlign: "center", marginBottom: 24 }}>{errorMessage}</Text>
+                        <TouchableOpacity style={[pg.submitBtn, { backgroundColor: "#dc2626" }]} onPress={() => setShowErrorModal(false)}>
+                            <Text style={pg.submitBtnText}>Close</Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
             </Modal>
         </View>
@@ -863,6 +986,51 @@ const pg = StyleSheet.create({
         alignItems: "center"
     },
     dropdownItemText: { fontSize: 13, fontFamily: "Poppins_400Regular", color: "#0f172a" },
+
+    // Standardized Modals
+    modalOverlay: { 
+        flex: 1, 
+        backgroundColor: "rgba(0,0,0,0.5)", 
+        alignItems: "center", 
+        justifyContent: "center", 
+        padding: 16 
+    },
+    modalBox: { 
+        backgroundColor: "#fff", 
+        borderRadius: 16, 
+        overflow: "hidden", 
+        width: "100%", 
+        maxWidth: 680, 
+        maxHeight: "90%", 
+        boxShadow: "0px 8px 24px rgba(0, 0, 0, 0.2)", 
+        elevation: 10 
+    },
+    cancelBtn: { 
+        paddingVertical: 12, 
+        paddingHorizontal: 24, 
+        borderRadius: 16, 
+        borderWidth: 1.5, 
+        borderColor: "#e2e8f0" 
+    },
+    cancelBtnText: { 
+        fontSize: 14, 
+        fontFamily: "Poppins_600SemiBold", 
+        color: "#475569" 
+    },
+    submitBtn: { 
+        flexDirection: "row", 
+        alignItems: "center", 
+        justifyContent: "center", 
+        backgroundColor: "#3b82f6", 
+        borderRadius: 16, 
+        paddingVertical: 12, 
+        paddingHorizontal: 24 
+    },
+    submitBtnText: { 
+        fontSize: 14, 
+        fontFamily: "Poppins_600SemiBold", 
+        color: "#fff" 
+    },
 });
 
 export default DataReportsPage;
