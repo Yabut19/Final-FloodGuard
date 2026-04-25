@@ -4982,7 +4982,21 @@ function NotificationProvider({ children }) {
   useEffect(() => {
     if (!socket) return;
 
-    socket.on("new_notification", (data) => {
+    socket.on("new_notification", async (data) => {
+      // ── NAVIGATION GUARD: Don't show popups on auth-related screens ──
+      if (navigationRef.isReady()) {
+        const route = navigationRef.getCurrentRoute();
+        const authScreens = ['Landing', 'Login', 'Loading', 'ChangePassword'];
+        if (route && authScreens.includes(route.name)) {
+          console.log(`[WS] Notification suppressed on screen: ${route.name}`);
+          return;
+        }
+      }
+
+      // Secondary check for data persistence
+      const storedUser = await AsyncStorage.getItem("userData");
+      if (!storedUser) return;
+
       console.log("[WS] Instant alert received:", data);
       
       const normalizedId = data.type === 'alert' || data.type === 'auto_alert' ? `alert-${data.id || 'new'}` :
@@ -5164,7 +5178,17 @@ function NotificationProvider({ children }) {
       const latestItems = combined.slice(0, 5);
 
       // Pop-up logic for new alerts (Fallback/Polling)
-      if (latestItems.length > 0 && isBackground) {
+      // Only show if user is logged in AND not on an auth screen
+      let shouldShowFallback = latestItems.length > 0 && isBackground && storedUser;
+      if (shouldShowFallback && navigationRef.isReady()) {
+        const route = navigationRef.getCurrentRoute();
+        const authScreens = ['Landing', 'Login', 'Loading', 'ChangePassword'];
+        if (route && authScreens.includes(route.name)) {
+          shouldShowFallback = false;
+        }
+      }
+
+      if (shouldShowFallback) {
         const newItem = latestItems[0];
 
         // Suppress pop-up if the user has already read/dismissed, if already shown, or if the broadcast is NOT active
