@@ -6,6 +6,8 @@ import { styles } from "../styles/globalStyles";
 import { API_BASE_URL } from "../config/api";
 import dialogs from "../utils/dialogs";
 import { areValuesEqual } from "../utils/helpers";
+import { getSocket } from "../utils/socketManager";
+
 
 const AdminSidebar = ({ activePage, onNavigate, onLogout, variant = "lgu" }) => {
     const isSuperAdmin = variant === "superadmin";
@@ -73,35 +75,55 @@ const AdminSidebar = ({ activePage, onNavigate, onLogout, variant = "lgu" }) => 
     const [errorMessage, setErrorMessage] = React.useState("");
 
     React.useEffect(() => {
-        // Check for stored name on component mount
-        if (typeof localStorage !== 'undefined') {
-            const storedName = localStorage.getItem("userName");
-            if (storedName) {
-                setUserName(storedName);
-            }
+        const fetchProfile = () => {
+            // Check for stored name on component mount
+            if (typeof localStorage !== 'undefined') {
+                const storedName = localStorage.getItem("userName");
+                if (storedName) {
+                    setUserName(storedName);
+                }
 
-            // Try to fetch user data for profile
-            const userId = localStorage.getItem("userId");
-            const userType = (isSuperAdmin || variant === 'lgu') ? 'admin' : 'user';
+                // Try to fetch user data for profile
+                const userId = localStorage.getItem("userId");
+                const userType = (isSuperAdmin || variant === 'lgu') ? 'admin' : 'user';
 
-            if (userId) {
-                fetch(`${API_BASE_URL}/api/users/${userId}?type=${userType}`)
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.avatar_url) {
-                            setAvatarUrl(`${API_BASE_URL}${data.avatar_url}`);
-                        }
-                        // Initialize form data
-                        setProfileForm({
-                            full_name: data.full_name || "",
-                            email: data.email || "",
-                            phone: data.phone || ""
-                        });
-                    })
-                    .catch(err => console.error("Failed to fetch user profile:", err));
+                if (userId) {
+                    fetch(`${API_BASE_URL}/api/users/${userId}?type=${userType}`)
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.avatar_url) {
+                                setAvatarUrl(`${API_BASE_URL}${data.avatar_url}`);
+                            }
+                            // Initialize form data
+                            const newProfile = {
+                                full_name: data.full_name || "",
+                                email: data.email || "",
+                                phone: data.phone || ""
+                            };
+                            setProfileForm(newProfile);
+                            initialProfileFormRef.current = newProfile;
+                            
+                            // Keep name in sync if it changed from admin side
+                            if (data.full_name) {
+                                setUserName(data.full_name);
+                                localStorage.setItem("userName", data.full_name);
+                            }
+                        })
+                        .catch(err => console.error("Failed to fetch user profile:", err));
+                }
             }
+        };
+
+        fetchProfile();
+
+        const socket = getSocket();
+        if (socket) {
+            socket.on("user_update", fetchProfile);
         }
-    }, []);
+        return () => {
+            if (socket) socket.off("user_update", fetchProfile);
+        };
+    }, [isSuperAdmin, variant]);
 
     const handleUpdateProfile = async () => {
         const userId = localStorage.getItem("userId");

@@ -496,12 +496,18 @@ def get_all_sensors(current_user):
     db = get_db()
     cur = db.cursor(dictionary=True)
     try:
-        cur.execute("""
+        query = """
             SELECT id, name, barangay, description, lat, lng, status, battery_level, 
                    signal_strength, power_supply, voltage, current, power_consumption, last_update
             FROM sensors
-            ORDER BY last_update DESC
-        """)
+        """
+        params = []
+        if current_user.get('barangay') and current_user['barangay'] != 'All Locations':
+            query += " WHERE barangay = %s"
+            params.append(current_user['barangay'])
+            
+        query += " ORDER BY last_update DESC"
+        cur.execute(query, params)
         sensors = cur.fetchall()
         
         for sensor in sensors:
@@ -524,8 +530,14 @@ def get_all_sensors_status(current_user):
     db = get_db()
     cur = db.cursor(dictionary=True)
     try:
-        # Get all registered sensors
-        cur.execute("SELECT id, name, barangay, lat, lng, status, battery_level, signal_strength, power_supply, voltage, current, power_consumption, last_update FROM sensors")
+        # Get all registered sensors (filtered by barangay if applicable)
+        query = "SELECT id, name, barangay, lat, lng, status, battery_level, signal_strength, power_supply, voltage, current, power_consumption, last_update FROM sensors"
+        params = []
+        if current_user.get('barangay') and current_user['barangay'] != 'All Locations':
+            query += " WHERE barangay = %s"
+            params.append(current_user['barangay'])
+            
+        cur.execute(query, params)
         sensors = cur.fetchall()
         
         # DEBUG: Print number of sensors found

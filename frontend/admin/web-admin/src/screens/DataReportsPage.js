@@ -364,7 +364,7 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 <div class="section" style="border-top: 2px solid #dcfce7; padding-top: 24px; margin-top: 40px; background: #f0fdf4; padding: 20px; border-radius: 12px;">
                     <div>
                         <p class="label" style="color: #166534;">Verified Status</p>
-                        <p class="value" style="color: #166534;">${report.incident_status || "Active"}</p>
+                        <p class="value" style="color: #166534;">${report.incident_status === "Active" || !report.incident_status ? "Verified" : report.incident_status}</p>
                     </div>
                 </div>` : ''}
 
@@ -722,7 +722,7 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                                 <View style={pg.verifiedDetails}>
                                                     <View style={pg.detailRow}>
                                                         <Text style={pg.detailLabel}>Verified Status:</Text>
-                                                        <Text style={[pg.detailValue, { color: "#dc2626" }]}>{report.incident_status || "Verified Active"}</Text>
+                                                        <Text style={[pg.detailValue, { color: "#dc2626" }]}>{report.incident_status === "Active" || !report.incident_status ? "Verified" : report.incident_status}</Text>
                                                     </View>
                                                 </View>
                                             )}

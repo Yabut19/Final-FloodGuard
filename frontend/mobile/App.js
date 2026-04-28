@@ -75,7 +75,7 @@ const UserDataProvider = ({ children }) => {
       if (stored) {
         const parsed = JSON.parse(stored);
         setUserData(prev => prev || parsed); // Initial optimistic load from storage
-        
+
         const response = await fetch(`${API_BASE}/api/users/${parsed.id}`);
         if (response.ok) {
           const freshData = await response.json();
@@ -96,7 +96,24 @@ const UserDataProvider = ({ children }) => {
   useEffect(() => {
     if (socket) {
       socket.on("user_update", fetchUser);
-      return () => socket.off("user_update", fetchUser);
+      socket.on("force_logout", async (data) => {
+        try {
+          const stored = await AsyncStorage.getItem('userData');
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (data.type === 'u' && String(parsed.id) === String(data.id)) {
+              console.log("[Socket] Force logout received for this mobile user.");
+              await AsyncStorage.removeItem('userData');
+              setUserData(null);
+              globalNavigate("Landing");
+            }
+          }
+        } catch (e) { }
+      });
+      return () => {
+        socket.off("user_update", fetchUser);
+        socket.off("force_logout");
+      };
     }
   }, [socket, fetchUser]);
 
@@ -150,8 +167,9 @@ const SocketProvider = ({ children }) => {
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
         timeout: 20000,
-        pingTimeout: 10000,
-        pingInterval: 5000,
+        pingTimeout: 30000,
+        pingInterval: 15000,
+        namespace: "/"
       });
 
       globalMobileSocket.on("connect", () => console.log("[Socket] Connection established"));
@@ -200,9 +218,26 @@ const SensorStatusProvider = ({ children }) => {
  * Utility for standardized date and time formatting
  * Philippine Standard Time (UTC+8 / Asia/Manila)
  */
+const parseToPSTDate = (date) => {
+  if (!date) return new Date(NaN);
+  if (typeof date !== 'string') return new Date(date);
+
+  let dateStr = date;
+  // Backend often sends PST time labeled incorrectly as GMT or UTC (Z)
+  if (dateStr.includes('GMT')) {
+    dateStr = dateStr.replace('GMT', '+0800');
+  } else if (dateStr.endsWith('Z')) {
+    dateStr = dateStr.replace('Z', '+08:00');
+  } else if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(dateStr)) {
+    dateStr = dateStr.replace(' ', 'T') + '+08:00';
+  }
+
+  return new Date(dateStr);
+};
+
 const formatPST = (date) => {
   if (!date) return "—";
-  const d = typeof date === 'string' ? new Date(date) : date;
+  const d = parseToPSTDate(date);
   if (isNaN(d.getTime())) return "—";
   const options = {
     timeZone: 'Asia/Manila',
@@ -225,7 +260,7 @@ const formatPST = (date) => {
 
 const formatPSTShort = (date) => {
   if (!date) return "—";
-  const d = typeof date === 'string' ? new Date(date) : date;
+  const d = parseToPSTDate(date);
   if (isNaN(d.getTime())) return "—";
   const options = {
     timeZone: 'Asia/Manila',
@@ -394,7 +429,7 @@ const SETTINGS_ITEMS = [
   {
     id: "notifications",
     title: "Alert Preferences",
-    description: "Manage notification types and frequency",
+    description: "Manage and update your location preferences.",
     icon: "notifications",
     section: "Notifications",
   },
@@ -456,7 +491,7 @@ const getStatusColor = (status) => {
     case "WARNING": return "#f97316";  // Orange
     case "ADVISORY": return "#3b82f6"; // Blue
     case "NORMAL": return "#22c55e";   // Green
-    case "OFFLINE": 
+    case "OFFLINE":
     case "DISCONNECTED": return "#64748b";
     default: return "#64748b";
   }
@@ -916,25 +951,25 @@ const EditProfileModal = ({ visible, userData, onSave, onCancel, onPickImage, on
                 <Ionicons name="camera" size={14} color="white" />
               </View>
             </TouchableOpacity>
-            
+
             {/* Remove Avatar Button */}
             {(userData?.avatar_url || selectedImage) && (
-              <TouchableOpacity 
-                style={{ 
-                  marginTop: 10, 
-                  backgroundColor: 'rgba(239, 68, 68, 0.1)', 
-                  paddingHorizontal: 12, 
-                  paddingVertical: 6, 
+              <TouchableOpacity
+                style={{
+                  marginTop: 10,
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
                   borderRadius: 15,
                   borderWidth: 1,
                   borderColor: 'rgba(239, 68, 68, 0.2)'
-                }} 
+                }}
                 onPress={onRemoveImage}
               >
                 <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: '600' }}>Remove Photo</Text>
               </TouchableOpacity>
             )}
-            
+
             <Text style={styles.editProfileAvatarLabel}>
               {selectedImage ? "Image selected - tap to change" : "Tap to change photo"}
             </Text>
@@ -1185,7 +1220,7 @@ const LoginScreen = ({ navigation }) => {
         {/* Footer info */}
         <View style={{ marginTop: 40, alignItems: 'center' }}>
           <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, fontFamily: "Poppins_400Regular" }}>
-            FloodGuard Ecosystem • Community Edition v1.2
+            FloodGuard 2026
           </Text>
         </View>
       </KeyboardAvoidingView>
@@ -1924,40 +1959,7 @@ const NotificationsScreen = ({ navigation, toggles, setToggles, form, selection 
           </View>
         </Card>
 
-        <Card style={styles.toggleCard}>
-          <View style={styles.toggleHeader}>
-            <View style={[styles.iconBadge, { backgroundColor: "#34495E" }]}>
-              <Ionicons name="cloud" size={18} color="#74C5E6" />
-            </View>
-            <View style={styles.toggleText}>
-              <Text style={styles.toggleTitle}>Weather Updates</Text>
-              <Text style={styles.toggleSubtitle}>
-                Rainfall forecasts and water level changes
-              </Text>
-              <Text style={styles.toggleNote}>Recommended</Text>
-            </View>
-            <Switch value={toggles.weather} onValueChange={onToggle("weather")} />
-          </View>
-        </Card>
 
-        <Card style={styles.toggleCard}>
-          <View style={styles.toggleHeader}>
-            <View style={[styles.iconBadge, { backgroundColor: "#34495E" }]}>
-              <Ionicons name="people" size={18} color="#74C5E6" />
-            </View>
-            <View style={styles.toggleText}>
-              <Text style={styles.toggleTitle}>Community Reports</Text>
-              <Text style={styles.toggleSubtitle}>
-                Updates from residents in your area
-              </Text>
-              <Text style={styles.toggleNote}>Optional</Text>
-            </View>
-            <Switch
-              value={toggles.community}
-              onValueChange={onToggle("community")}
-            />
-          </View>
-        </Card>
       </View>
 
       <InfoNote text="Offline Mode: Critical alerts and evacuation maps are cached for offline access." />
@@ -1976,6 +1978,7 @@ const CustomHeader = ({ navigation, title, subtitle }) => {
   const [isNotifVisible, setIsNotifVisible] = useState(false);
   const { notifications, unreadCount, loading, readIds, markAsRead, markAllAsRead, clearDropdown, hiddenIds } = useNotifications();
   const visibleNotifications = notifications.filter(n => !hiddenIds.includes(n.id)).slice(0, 5);
+  const bellUnreadCount = notifications.filter(n => !readIds.includes(n.id) && !hiddenIds.includes(n.id)).length;
 
   const topInset = Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0;
 
@@ -2006,7 +2009,7 @@ const CustomHeader = ({ navigation, title, subtitle }) => {
           style={{ marginRight: 24 }}
         >
           <Ionicons name="notifications-outline" size={24} color={theme.textPrimary} />
-          {unreadCount > 0 && (
+          {bellUnreadCount > 0 && (
             <View style={{ position: 'absolute', top: -2, right: -2, width: 8, height: 8, borderRadius: 4, backgroundColor: '#e2463b', borderWidth: 1.5, borderColor: theme.surface }} />
           )}
         </TouchableOpacity>
@@ -2144,9 +2147,9 @@ const WelcomeBanner = () => {
             style={styles.welcomeAvatarGradient}
           >
             {profilePic ? (
-              <Image 
-                source={{ uri: profilePic.startsWith('http') ? profilePic : `${API_BASE}${profilePic}?t=${avatarTimestamp}` }} 
-                style={styles.welcomeAvatarImage} 
+              <Image
+                source={{ uri: profilePic.startsWith('http') ? profilePic : `${API_BASE}${profilePic}?t=${avatarTimestamp}` }}
+                style={styles.welcomeAvatarImage}
               />
             ) : (
               <Text style={styles.welcomeAvatarText}>{avatarInitial}</Text>
@@ -2229,7 +2232,7 @@ const DashboardScreen = ({ navigation }) => {
         if (data.thresholds) {
           setThresholds(data.thresholds);
         }
-        
+
         // ── LIVE VALIDATION: Only mark as active if coming from WebSocket ──
         if (data.is_offline) {
           setLastUpdated(null);
@@ -2364,7 +2367,7 @@ const DashboardScreen = ({ navigation }) => {
     if (isSensorOffline) return "OFFLINE";
     // "Disconnected" means hardware/transmission failure (no data)
     if (isDisconnected) return "DISCONNECTED";
-    
+
     const lvl = Number(latestSensor?.flood_level ?? 0);
     if (lvl >= (thresholds?.critical_cm || 25)) return "CRITICAL";
     if (lvl >= (thresholds?.warning_cm || 15)) return "WARNING";
@@ -2622,8 +2625,8 @@ const MapScreen = ({ navigation, route }) => {
       flood_level: latestMapSensor?.flood_level ?? 0,
       status: latestMapSensor?.enabled === false ? "OFFLINE" : (latestMapSensor?.is_offline ? "DISCONNECTED" : (latestMapSensor?.status || "NO DATA")),
       risk:
-        (latestMapSensor?.flood_level ?? 0) >= thresholds.critical_cm ? "high" : 
-        (latestMapSensor?.flood_level ?? 0) >= thresholds.warning_cm ? "medium" : "low",
+        (latestMapSensor?.flood_level ?? 0) >= thresholds.critical_cm ? "high" :
+          (latestMapSensor?.flood_level ?? 0) >= thresholds.warning_cm ? "medium" : "low",
     },
   ];
   const mapFocusSensor = mergedSensors[0];
@@ -2683,15 +2686,15 @@ const MapScreen = ({ navigation, route }) => {
         <View style={styles.mapLegendItems}>
           <View style={styles.mapLegendItem}>
             <View style={[styles.legendDot, { backgroundColor: "#32c26a" }]} />
-            <Text style={styles.legendText}>Low risk</Text>
+            <Text style={styles.legendText}>Advisory risk</Text>
           </View>
           <View style={styles.mapLegendItem}>
             <View style={[styles.legendDot, { backgroundColor: "#f5c542" }]} />
-            <Text style={styles.legendText}>Medium risk</Text>
+            <Text style={styles.legendText}>Warning risk</Text>
           </View>
           <View style={styles.mapLegendItem}>
             <View style={[styles.legendDot, { backgroundColor: "#f35b5b" }]} />
-            <Text style={styles.legendText}>High risk</Text>
+            <Text style={styles.legendText}>Critical risk</Text>
           </View>
         </View>
         <Text style={styles.sensorCount}>
@@ -2704,78 +2707,10 @@ const MapScreen = ({ navigation, route }) => {
 const AlertsScreen = ({ navigation }) => {
   const { theme } = useTheme();
   const styles = getStyles(theme);
-  const { markAllAsRead } = useNotifications();
+  const { notifications: alerts, loading, markAllAsRead, removeNotification } = useNotifications();
   const [filter, setFilter] = useState("all");
-  const [alerts, setAlerts] = useState([]);
-  const [loading, setLoading] = useState(true);
   const topInset = Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0;
   const bottomInset = Platform.OS === "android" ? 32 : 16;
-
-
-  const fetchAlerts = async () => {
-    try {
-      // Get user ID to filter out dismissed alerts
-      const storedUser = await AsyncStorage.getItem("userData");
-      let url = `${API_BASE}/api/alerts/`;
-
-      if (storedUser) {
-        const user = JSON.parse(storedUser);
-        if (user?.id) {
-          url += `?user_id=${user.id}`;
-        }
-      }
-
-      console.log("Fetching alerts from:", url);
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Error response:", response.status, errorText);
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
-      const data = await response.json();
-      console.log("Alerts data received:", data);
-
-      const mapped = data.map(a => ({
-        ...a,
-        severity: a.level,
-        location: a.barangay,
-        // format timestamp if needed
-      }));
-      setAlerts(mapped);
-      setLoading(false);
-    } catch (error) {
-      console.error("Error fetching alerts:", error);
-      setLoading(false);
-    }
-  };
-
-  const socket = useSocket();
-
-  useEffect(() => {
-    fetchAlerts();
-
-    if (socket) {
-      socket.on("new_notification", () => {
-        console.log("[WS] Alert list refreshing instantly...");
-        fetchAlerts();
-      });
-      socket.on("alert_update", () => {
-        console.log("[WS] Alerts updated, refreshing list...");
-        fetchAlerts();
-      });
-    }
-
-    const interval = setInterval(fetchAlerts, 15000); // Polling as fallback only
-    return () => {
-      if (socket) {
-        socket.off("new_notification");
-        socket.off("alert_update");
-      }
-      clearInterval(interval);
-    };
-  }, [socket]);
 
   const handleDeleteAlert = (alertId, alertTitle) => {
     Alert.alert(
@@ -2806,7 +2741,8 @@ const AlertsScreen = ({ navigation }) => {
                 return;
               }
 
-              const dismissUrl = `${API_BASE}/api/alerts/user/${userId}/dismiss/${alertId}`;
+              const normalizedId = alertId.toString().replace('alert-', '');
+              const dismissUrl = `${API_BASE}/api/alerts/user/${userId}/dismiss/${normalizedId}`;
               console.log("Dismissing alert at URL:", dismissUrl);
 
               // Call the dismiss endpoint (user-specific deletion)
@@ -2822,8 +2758,8 @@ const AlertsScreen = ({ navigation }) => {
               console.log("Dismiss response data:", responseData);
 
               if (response.ok) {
-                // Remove the alert from the local list
-                setAlerts(alerts.filter(a => a.id !== alertId));
+                // Remove the alert from the global list
+                removeNotification(alertId);
                 Alert.alert("Success", "Alert deleted successfully");
               } else {
                 Alert.alert("Error", responseData.error || "Failed to delete alert");
@@ -2839,22 +2775,65 @@ const AlertsScreen = ({ navigation }) => {
     );
   };
 
+  const [isFilterDropdownVisible, setIsFilterDropdownVisible] = useState(false);
+
+  const alertStats = useMemo(() => {
+    const counts = { advisory: 0, warning: 0, critical: 0 };
+    alerts.forEach(a => {
+      if (a.severity === 'critical') counts.critical++;
+      else if (a.severity === 'warning') counts.warning++;
+      else if (a.severity === 'advisory') counts.advisory++;
+    });
+
+    let majority = 'advisory';
+    let maxCount = counts.advisory;
+
+    // Tie-breaking: Critical > Warning > Advisory
+    if (counts.warning >= maxCount && counts.warning > 0) {
+      majority = 'warning';
+      maxCount = counts.warning;
+    }
+    if (counts.critical >= maxCount && counts.critical > 0) {
+      majority = 'critical';
+      maxCount = counts.critical;
+    }
+
+    let statusText = "Advisory";
+    let color = "#3b82f6"; // Blue for advisory
+
+    if (maxCount > 0) {
+      if (majority === 'critical') {
+        statusText = "Critical";
+        color = "#dc2626";
+      } else if (majority === 'warning') {
+        statusText = "Warning";
+        color = "#f97316";
+      }
+    } else {
+      statusText = "Normal";
+      color = "#32c26a";
+    }
+
+    return { statusText, color, totalActive: alerts.length };
+  }, [alerts]);
+
   const filteredAlerts = useMemo(() => {
-    if (filter === "all") {
-      return alerts;
-    }
-    if (filter === "active") {
-      return alerts.filter((alert) => alert.status === "active");
-    }
-    if (filter === "critical") {
-      return alerts.filter((alert) => alert.severity === "critical");
-    }
-    return alerts;
+    if (filter === "all") return alerts;
+    if (filter === "evacuation") return alerts.filter(a => a.level === "evacuation");
+    return alerts.filter(a => a.severity === filter);
   }, [filter, alerts]);
 
-  const activeCount = alerts.filter((alert) => alert.status === "active").length;
-  const areaStatus = "Medium Risk";
-  const statusColor = "#f5c542";
+  const { statusText: areaStatus, color: statusColor, totalActive: activeCount } = alertStats;
+
+  const filterOptions = [
+    { id: "all", label: "All Alerts" },
+    { id: "advisory", label: "Advisory" },
+    { id: "warning", label: "Warning" },
+    { id: "critical", label: "Critical" },
+    { id: "evacuation", label: "Evacuation" },
+  ];
+
+  const currentFilterLabel = filterOptions.find(o => o.id === filter)?.label || "All Alerts";
 
   const renderAlertCard = (alert) => {
     let accent = "#32c26a";
@@ -2927,7 +2906,7 @@ const AlertsScreen = ({ navigation }) => {
               }
             ]}>
               <Text style={styles.levelBadgeText}>
-                {alert.level === "critical" ? "HIGH" : alert.level === "warning" ? "MEDIUM" : "LOW"} LEVEL
+                {alert.level === "critical" ? "CRITICAL" : alert.level === "warning" ? "WARNING" : "ADVISORY"} LEVEL
               </Text>
             </View>
           </View>
@@ -2936,13 +2915,13 @@ const AlertsScreen = ({ navigation }) => {
         {/* Evacuation Specific Info */}
         {alert.level === 'evacuation' && (
           <View style={{ marginBottom: 8, backgroundColor: 'rgba(30, 58, 138, 0.1)', padding: 10, borderRadius: 8 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4, gap: 10 }}>
               <Text style={{ color: '#94a3b8', fontSize: 11 }}>Location:</Text>
-              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600' }}>{alert.evacuation_location || alert.location}</Text>
+              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600', flex: 1, textAlign: 'right' }}>{alert.evacuation_location || alert.location}</Text>
             </View>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
               <Text style={{ color: '#94a3b8', fontSize: 11 }}>Capacity:</Text>
-              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600' }}>{alert.evacuation_capacity || 'N/A'}</Text>
+              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600', flex: 1, textAlign: 'right' }}>{alert.evacuation_capacity || 'N/A'}</Text>
             </View>
           </View>
         )}
@@ -2956,14 +2935,7 @@ const AlertsScreen = ({ navigation }) => {
             </Text>
           </View>
         ) : null}
-        {alert.incident_status && alert.level !== 'evacuation' ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6 }}>
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#f59e0b' }} />
-            <Text style={[styles.alertMetaText, { color: '#f59e0b', fontWeight: '700', fontSize: 10, textTransform: 'uppercase' }]}>
-              Status: {alert.incident_status}
-            </Text>
-          </View>
-        ) : null}
+
         <View style={styles.alertMeta}>
           <Text style={styles.alertMetaText}>{alert.location}</Text>
           <Text style={styles.alertMetaText}>{alert.timestamp ? formatPST(alert.timestamp) : "—"}</Text>
@@ -2982,30 +2954,56 @@ const AlertsScreen = ({ navigation }) => {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.filterRow}>
-          {[
-            { id: "all", label: "All" },
-            { id: "active", label: "Active" },
-            { id: "critical", label: "Critical" },
-          ].map((item) => (
-            <TouchableOpacity
-              key={item.id}
-              style={[
-                styles.filterPill,
-                filter === item.id && styles.filterPillActive,
-              ]}
-              onPress={() => setFilter(item.id)}
-            >
-              <Text
-                style={[
-                  styles.filterText,
-                  filter === item.id && styles.filterTextActive,
-                ]}
-              >
-                {item.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+        <View style={styles.filterContainer}>
+          <TouchableOpacity
+            style={styles.dropdownTrigger}
+            onPress={() => setIsFilterDropdownVisible(true)}
+            activeOpacity={0.7}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Ionicons name="funnel-outline" size={16} color={theme.primary} />
+              <Text style={styles.dropdownTriggerText}>{currentFilterLabel}</Text>
+            </View>
+            <Ionicons name="chevron-down" size={16} color={theme.textSecondary} />
+          </TouchableOpacity>
+
+          <Modal
+            visible={isFilterDropdownVisible}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={() => setIsFilterDropdownVisible(false)}
+          >
+            <TouchableWithoutFeedback onPress={() => setIsFilterDropdownVisible(false)}>
+              <View style={styles.dropdownOverlay}>
+                <View style={styles.dropdownMenu}>
+                  <Text style={styles.dropdownHeader}>Filter Alerts</Text>
+                  {filterOptions.map((item) => (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[
+                        styles.dropdownItem,
+                        filter === item.id && styles.dropdownItemActive
+                      ]}
+                      onPress={() => {
+                        setFilter(item.id);
+                        setIsFilterDropdownVisible(false);
+                      }}
+                    >
+                      <Text style={[
+                        styles.dropdownItemText,
+                        filter === item.id && styles.dropdownItemTextActive
+                      ]}>
+                        {item.label}
+                      </Text>
+                      {filter === item.id && (
+                        <Ionicons name="checkmark" size={18} color={theme.primary} />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </Modal>
         </View>
 
         {loading ? (
@@ -3098,7 +3096,7 @@ const AlertDetailScreen = ({ route, navigation }) => {
                 }
               ]}>
                 <Text style={[styles.levelBadgeText, { fontSize: 12 }]}>
-                  {alert.level === "critical" ? "HIGH" : alert.level === "warning" ? "MEDIUM" : "LOW"} LEVEL
+                  {alert.level === "critical" ? "CRITICAL" : alert.level === "warning" ? "WARNING" : "ADVISORY"} LEVEL
                 </Text>
               </View>
               <Text style={{ color: '#94a3b8', fontSize: 13, fontWeight: '600' }}>Official Flood Level</Text>
@@ -3141,24 +3139,24 @@ const AlertDetailScreen = ({ route, navigation }) => {
           <Card style={styles.alertDetailCard}>
             <Text style={styles.alertDetailLabel}>Center Information</Text>
             <View style={{ gap: 12, marginTop: 8 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
                 <Text style={{ color: '#94a3b8' }}>Location</Text>
-                <Text style={{ color: '#fff', fontWeight: '600' }}>{alert.evacuation_location || alert.location}</Text>
+                <Text style={{ color: '#fff', fontWeight: '600', flex: 1, textAlign: 'right' }}>{alert.evacuation_location || alert.location}</Text>
               </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
                 <Text style={{ color: '#94a3b8' }}>Total Capacity</Text>
-                <Text style={{ color: '#fff', fontWeight: '600' }}>{alert.evacuation_capacity || 'N/A'}</Text>
+                <Text style={{ color: '#fff', fontWeight: '600', flex: 1, textAlign: 'right' }}>{alert.evacuation_capacity || 'N/A'}</Text>
               </View>
             </View>
           </Card>
         )}
 
-        {/* Official Recommendation Section - Not for evacuation */}
+        {/* Recommended Action Section - Not for evacuation */}
         {alert.level !== 'evacuation' && (
           <Card style={[styles.alertDetailCard, { borderLeftWidth: 4, borderLeftColor: '#34d399' }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
               <Ionicons name="shield-checkmark" size={18} color="#34d399" />
-              <Text style={[styles.alertDetailLabel, { color: '#34d399', marginBottom: 0 }]}>Official Recommendation</Text>
+              <Text style={[styles.alertDetailLabel, { color: '#34d399', marginBottom: 0 }]}>Recommended Action</Text>
             </View>
             <Text style={[styles.alertDetailDescription, { fontStyle: 'italic', color: '#ffffff' }]}>
               {alert.recommended_action || alert.recommendations || alert.actions || "No specific action recommended. Stay tuned for updates from local officials."}
@@ -3166,24 +3164,7 @@ const AlertDetailScreen = ({ route, navigation }) => {
           </Card>
         )}
 
-        {/* Current Incident Status - Not for evacuation */}
-        {alert.level !== 'evacuation' && (
-          <Card style={styles.alertDetailCard}>
-            <Text style={styles.alertDetailLabel}>Incident Status</Text>
-            <View style={[
-              styles.incidentBadge,
-              { paddingHorizontal: 12, paddingVertical: 6 },
-              styles.incidentBadgeActive
-            ]}>
-              <Text style={[
-                styles.incidentBadgeText,
-                { fontSize: 12 }
-              ]}>
-                {alert.incident_status || alert.report_status || "Active"}
-              </Text>
-            </View>
-          </Card>
-        )}
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -3235,8 +3216,9 @@ if(route.length>1){
 
 // Evacuation center pins
 centers.forEach(function(x){
+  var color = x.status === 'open' ? '#2fb864' : (x.status === 'full' ? '#f59e0b' : '#ef4444');
   var icon=L.divIcon({
-    html:'<div style="width:14px;height:14px;border-radius:50%;background:'+(x.status==='open'?'#2fb864':'#f59e0b')+';border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.5)"></div>',
+    html:'<div style="width:14px;height:14px;border-radius:50%;background:'+color+';border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.5)"></div>',
     iconSize:[14,14],iconAnchor:[7,7],className:''
   });
   L.marker([x.lat,x.lng],{icon:icon}).addTo(map);
@@ -3301,13 +3283,16 @@ function drawRoute(c){
   map.fitBounds([[uLat,uLng],[c.lat,c.lng]],{padding:[60,60]});
 }
 centers.forEach(function(c){
-  var open=c.status==='open';
+  var status = (c.status || '').toLowerCase();
+  var color = status === 'open' ? '#2fb864' : (status === 'full' ? '#f59e0b' : '#ef4444');
   var icon=L.divIcon({
-    html:'<div style="width:28px;height:28px;border-radius:50%;background:'+(open?'#2fb864':'#f59e0b')+';border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-family:sans-serif;font-size:11px;font-weight:bold;color:#fff">'+c.num+'</div>',
+    html:'<div style="width:28px;height:28px;border-radius:50%;background:'+color+';border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-family:sans-serif;font-size:11px;font-weight:bold;color:#fff">'+c.num+'</div>',
     iconSize:[28,28],iconAnchor:[14,14],className:''
   });
   var m=L.marker([c.lat,c.lng],{icon:icon}).addTo(map);
-  m.bindTooltip('<b>'+c.name+'</b><br>'+(open?'<span style="color:#2fb864">OPEN</span>':'<span style="color:#f59e0b">FULL</span>')+(c.distance?' \u00b7 '+c.distance+' away':''),{
+  var statusHtml = status === 'open' ? '<span style="color:#2fb864">OPEN</span>' : 
+                   (status === 'full' ? '<span style="color:#f59e0b">FULL</span>' : '<span style="color:#ef4444">CLOSED</span>');
+  m.bindTooltip('<b>'+c.name+'</b><br>'+statusHtml+(c.distance?' \u00b7 '+c.distance+' away':''),{
     className:'evac-tip',direction:'top',offset:[0,-16]
   });
   m.on('click',function(){
@@ -3651,16 +3636,19 @@ const EvacuationScreen = ({ navigation }) => {
                   <View
                     style={[
                       styles.centerStatus,
-                      center.status === "open" ? styles.centerOpen : styles.centerFull,
+                      center.status === "open" ? styles.centerOpen : (center.status === "full" ? styles.centerFull : styles.centerClosed),
                     ]}
                   >
                     <Text
                       style={[
                         styles.centerStatusText,
-                        { color: center.status === "open" ? "#2fb864" : "#f59e0b" },
+                        {
+                          color: center.status === "open" ? "#2fb864" :
+                            (center.status === "full" ? "#f59e0b" : "#ef4444")
+                        },
                       ]}
                     >
-                      {center.status === "open" ? "OPEN" : "FULL"}
+                      {center.status ? center.status.toUpperCase() : "UNKNOWN"}
                     </Text>
                   </View>
                 </View>
@@ -3698,7 +3686,7 @@ const EvacuationScreen = ({ navigation }) => {
                   <View style={styles.centerFullNotice}>
                     <Feather name="alert-circle" size={12} color="#ef4444" />
                     <Text style={styles.centerFullNoticeText}>
-                      Center is full. Please use another nearby center.
+                      {center.status === "full" ? "Center is full. Please use another nearby center." : "This center is currently closed."}
                     </Text>
                   </View>
                 )}
@@ -3707,12 +3695,7 @@ const EvacuationScreen = ({ navigation }) => {
 
           </>
         )}
-        <Card style={styles.offlineNotice}>
-          <Text style={styles.offlineText}>
-            Offline Mode: Evacuation routes are cached and available without
-            internet connection.
-          </Text>
-        </Card>
+
       </ScrollView>
 
     </SafeAreaView>
@@ -3997,9 +3980,6 @@ const ActiveNavigationScreen = ({ navigation, route }) => {
           <TouchableOpacity style={styles.navEndButton} onPress={() => navigation.navigate("MainDrawer", { screen: "Evacuate" })}>
             <Text style={styles.navEndText}>End Navigation</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.navReportButton}>
-            <Text style={styles.navReportText}>Report Issue</Text>
-          </TouchableOpacity>
         </View>
 
       </ScrollView>
@@ -4017,25 +3997,25 @@ const ReportScreen = ({ navigation, userName }) => {
   const [description, setDescription] = useState("");
   const [photos, setPhotos] = useState([]);
   const [recentReports, setRecentReports] = useState([]);
+  const [hiddenReportIds, setHiddenReportIds] = useState([]);
   const [submitting, setSubmitting] = useState(false);
-  const [userData, setUserData] = useState(null);
+  const { userData } = useUserData();
   const locationLabel = userData?.barangay || "Mabolo District";
-
   const reporterName = userName || "Anonymous";
 
-  // Load user data from AsyncStorage
+  // Load hidden reports from AsyncStorage
   useEffect(() => {
-    const loadUserData = async () => {
+    const loadHiddenReports = async () => {
       try {
-        const storedUser = await AsyncStorage.getItem('userData');
-        if (storedUser) {
-          setUserData(JSON.parse(storedUser));
+        const stored = await AsyncStorage.getItem('hidden_report_ids');
+        if (stored) {
+          setHiddenReportIds(JSON.parse(stored));
         }
       } catch (error) {
-        console.error('Error loading user data:', error);
+        console.error('Error loading hidden reports:', error);
       }
     };
-    loadUserData();
+    loadHiddenReports();
   }, []);
 
 
@@ -4048,7 +4028,7 @@ const ReportScreen = ({ navigation, userName }) => {
     }, [userName])
   );
 
-  const fetchReports = async () => {
+  const fetchReports = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE}/api/reports/?reporter_name=${encodeURIComponent(reporterName)}`);
       if (response.ok) {
@@ -4058,6 +4038,38 @@ const ReportScreen = ({ navigation, userName }) => {
     } catch (error) {
       console.error("Failed to fetch reports:", error);
     }
+  }, [reporterName]);
+
+  const socket = useSocket();
+
+  useEffect(() => {
+    if (socket) {
+      socket.on("report_update", fetchReports);
+      return () => socket.off("report_update", fetchReports);
+    }
+  }, [socket, fetchReports]);
+
+  const handleDeleteReport = (reportId) => {
+    Alert.alert(
+      "Remove Report",
+      "Remove this report from your view? It will still be processed by LGU moderators.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const newHidden = [...hiddenReportIds, reportId];
+              setHiddenReportIds(newHidden);
+              await AsyncStorage.setItem('hidden_report_ids', JSON.stringify(newHidden));
+            } catch (error) {
+              console.error("Error hiding report:", error);
+            }
+          }
+        }
+      ]
+    );
   };
 
   const canSubmit = selectedType && description.trim().length > 0;
@@ -4208,7 +4220,6 @@ const ReportScreen = ({ navigation, userName }) => {
               <Text style={styles.reportLocationTitle}>Use Current Location</Text>
               <Text style={styles.reportLocationSubtitle}>{locationLabel}</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color="#94a3b8" />
           </Card>
         </View>
 
@@ -4274,77 +4285,74 @@ const ReportScreen = ({ navigation, userName }) => {
         <View style={styles.reportSection}>
           <Text style={styles.sectionTitle}>Your Recent Reports</Text>
           <View style={styles.reportsList}>
-            {recentReports.map((report) => (
-              <Card key={report.id} style={styles.reportItem}>
-                <View style={styles.reportItemHeader}>
-                  <Text style={styles.reportItemTitle}>{report.type} Report</Text>
-                  <View
-                    style={[
-                      styles.reportStatus,
-                      report.status?.toLowerCase() === "verified"
-                        ? styles.reportStatusVerified
-                        : styles.reportStatusReview,
-                    ]}
-                  >
-                    <Text style={styles.reportStatusText}>
-                      {report.status ? report.status.charAt(0).toUpperCase() + report.status.slice(1) : ""}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={styles.reportItemLocation}>{report.location}</Text>
-                <Text style={styles.reportItemTime}>{report.timestamp ? formatPST(report.timestamp) : "—"}</Text>
-
-                {/* Official Verification Details */}
-                {report.status.toLowerCase() === "verified" && (
-                  <View style={styles.verificationSection}>
-                    <View style={styles.verificationHeader}>
-                      <Ionicons name="shield-checkmark" size={14} color="#74C5E6" />
-                      <Text style={styles.verificationTitle}>Official Verification</Text>
+            {recentReports
+              .filter(r => !hiddenReportIds.includes(r.id))
+              .map((report) => (
+                <Card key={report.id} style={styles.reportItem}>
+                  <View style={styles.reportItemHeader}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.reportItemTitle}>{report.type} Report</Text>
                     </View>
-
-                    <View style={styles.verificationGrid}>
-                      <View style={styles.verificationItem}>
-                        <Text style={styles.verificationLabel}>Flood Level</Text>
-                        <View style={[
-                          styles.levelBadge,
-                          {
-                            backgroundColor:
-                              report.flood_level_reported === "High" ? "#e2463b" :
-                                report.flood_level_reported === "Medium" ? "#f29339" : "#f5c542"
-                          }
-                        ]}>
-                          <Text style={styles.levelBadgeText}>{report.flood_level_reported || "Low"}</Text>
-                        </View>
-                      </View>
-
-                      <View style={styles.verificationItem}>
-                        <Text style={styles.verificationLabel}>Status</Text>
-                        <View style={[
-                          styles.incidentBadge,
-                          report.report_status === "Resolved" ? styles.incidentBadgeResolved : styles.incidentBadgeActive
-                        ]}>
-                          <Text style={[
-                            styles.incidentBadgeText,
-                            report.report_status === "Resolved" && styles.incidentBadgeTextResolved
-                          ]}>
-                            {report.report_status || "Active"}
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-
-                    {report.recommendations && (
-                      <View style={styles.recommendationBlock}>
-                        <Text style={styles.recommendationLabel}>Official Recommendation</Text>
-                        <Text style={styles.recommendationText}>
-                          "{report.recommendations}"
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View
+                        style={[
+                          styles.reportStatus,
+                          report.status?.toLowerCase() === "verified"
+                            ? styles.reportStatusVerified
+                            : styles.reportStatusReview,
+                        ]}
+                      >
+                        <Text style={styles.reportStatusText}>
+                          {report.status ? report.status.charAt(0).toUpperCase() + report.status.slice(1) : ""}
                         </Text>
                       </View>
-                    )}
+                      <TouchableOpacity onPress={() => handleDeleteReport(report.id)} style={{ padding: 4 }}>
+                        <Feather name="trash-2" size={16} color="#e2463b" />
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                )}
-              </Card>
-            ))}
+                  <Text style={styles.reportItemLocation}>{report.location}</Text>
+                  <Text style={styles.reportItemTime}>{report.timestamp ? formatPST(report.timestamp) : "—"}</Text>
+
+                  {/* Official Verification Details */}
+                  {report.status.toLowerCase() === "verified" && (
+                    <View style={styles.verificationSection}>
+                      <View style={styles.verificationHeader}>
+                        <Ionicons name="shield-checkmark" size={14} color="#74C5E6" />
+                        <Text style={styles.verificationTitle}>Official Verification</Text>
+                      </View>
+
+                      <View style={styles.verificationGrid}>
+                        <View style={styles.verificationItem}>
+                          <Text style={styles.verificationLabel}>Flood Level</Text>
+                          <View style={[
+                            styles.levelBadge,
+                            {
+                              backgroundColor:
+                                (report.flood_level_reported === "High" || report.flood_level_reported === "Critical") ? "#dc2626" :
+                                  (report.flood_level_reported === "Medium" || report.flood_level_reported === "Warning") ? "#f97316" : "#3b82f6"
+                            }
+                          ]}>
+                            <Text style={styles.levelBadgeText}>
+                              {report.flood_level_reported === "High" ? "CRITICAL" :
+                                report.flood_level_reported === "Medium" ? "WARNING" : "ADVISORY"}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {report.recommendations && (
+                        <View style={styles.recommendationBlock}>
+                          <Text style={styles.recommendationLabel}>Recommended Action</Text>
+                          <Text style={styles.recommendationText}>
+                            "{report.recommendations}"
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </Card>
+              ))}
           </View>
         </View>
       </ScrollView>
@@ -4360,8 +4368,8 @@ const SettingsScreen = ({ navigation }) => {
 
   const topInset = Platform.OS === "android" ? StatusBar.currentHeight ?? 0 : 0;
   const bottomInset = Platform.OS === "android" ? 32 : 16;
-  const [offlineReady] = useState(true);
-  
+
+
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
@@ -4371,11 +4379,16 @@ const SettingsScreen = ({ navigation }) => {
   const [userSubscriptions, setUserSubscriptions] = useState([]);
   const [subsLoading, setSubsLoading] = useState(false);
 
-  // List of hardcoded barangays for now
+  // Official list of all registration sites
   const BARANGAYS = [
-    "Sitio San Vicente",
     "Sitio Magtalisay",
+    "Sitio Regla",
+    "Sitio Sinulog",
     "Sitio Laray Holy Name",
+    "Sitio San Vicente",
+    "Sitio San Isidro",
+    "Sitio Fatima",
+    "Sitio Sindulan",
     "Sitio Lahing-Lahing (Uno and Dos)"
   ];
 
@@ -4434,6 +4447,41 @@ const SettingsScreen = ({ navigation }) => {
       Alert.alert("Error", "Could not update subscription. Please try again.");
       fetchSubscriptions(userId); // revert on failure
     }
+  };
+
+  const handleUpdateLocation = async (newLocation) => {
+    Alert.alert(
+      "Change Primary Location",
+      `Are you sure you want to change your primary location to ${newLocation}? Your dashboard will immediately switch to the sensor data for this area.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Confirm Change",
+          onPress: async () => {
+            try {
+              const response = await fetch(`${API_BASE}/api/users/${userData.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  barangay: newLocation
+                })
+              });
+
+              if (response.ok) {
+                Alert.alert("Success", "Location updated successfully!");
+                refreshUser();
+              } else {
+                const err = await response.json();
+                Alert.alert("Update Failed", err.error || "Could not update location.");
+              }
+            } catch (error) {
+              console.error("Update location error:", error);
+              Alert.alert("Error", "Failed to connect to the server.");
+            }
+          }
+        }
+      ]
+    );
   };
 
 
@@ -4697,27 +4745,8 @@ const SettingsScreen = ({ navigation }) => {
           )}
         </View>
 
-        <Card style={styles.offlineCard}>
-          <View style={styles.offlineHeader}>
-            <View
-              style={[
-                styles.offlineDot,
-                { backgroundColor: offlineReady ? "#2fb864" : "#f5c542" },
-              ]}
-            />
-            <Text style={styles.offlineTitle}>
-              {offlineReady ? "Offline Mode Available" : "Offline Mode Unavailable"}
-            </Text>
-          </View>
-          <Text style={styles.offlineMessage}>
-            Critical data cached for offline access
-          </Text>
-        </Card>
-
-
         <View style={styles.settingsFooter}>
-          <Text style={styles.settingsFooterText}>Flood Monitor v1.0.0</Text>
-          <Text style={styles.settingsFooterText}>Capstone Project 2025</Text>
+          <Text style={styles.settingsFooterText}>FloodGuard 2026</Text>
         </View>
         <EditProfileModal
           visible={showEditProfile}
@@ -4747,43 +4776,51 @@ const SettingsScreen = ({ navigation }) => {
                 </TouchableOpacity>
               </View>
 
-              <Text style={{ color: theme.textSecondary, marginBottom: 15, paddingHorizontal: 5 }}>
-                Subscribe to receive instant flood alerts for specific areas.
-              </Text>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {/* --- PRIMARY LOCATION SECTION --- */}
+                <View style={{ marginBottom: 25 }}>
+                  <Text style={{ color: theme.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 8, paddingHorizontal: 5 }}>
+                    Primary Location
+                  </Text>
+                  <Text style={{ color: theme.textSecondary, fontSize: 13, marginBottom: 15, paddingHorizontal: 5 }}>
+                    Select your main area to receive priority alerts and view its local sensor data.
+                  </Text>
 
-              {subsLoading ? (
-                <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 20 }} />
-              ) : (
-                <ScrollView showsVerticalScrollIndicator={false}>
-                  {BARANGAYS.map((barangay) => {
-                    const isSubscribed = userSubscriptions.includes(barangay);
-                    return (
-                      <View key={barangay} style={{
+                  {BARANGAYS.filter(b => b !== userData?.barangay).map((barangay) => (
+                    <TouchableOpacity
+                      key={`loc-${barangay}`}
+                      onPress={() => handleUpdateLocation(barangay)}
+                      activeOpacity={0.7}
+                      style={{
                         flexDirection: 'row',
-                        justifyContent: 'space-between',
                         alignItems: 'center',
                         backgroundColor: theme.surface,
                         padding: 16,
-                        borderRadius: 12,
+                        borderRadius: 14,
                         marginBottom: 10,
-                        borderWidth: 1,
+                        borderWidth: 1.5,
                         borderColor: theme.border
+                      }}
+                    >
+                      <View style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 10,
+                        backgroundColor: 'rgba(116, 197, 230, 0.1)',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        marginRight: 12
                       }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                          <Ionicons name="location" size={20} color={isSubscribed ? theme.primary : theme.textSecondary} />
-                          <Text style={{ color: theme.textPrimary, fontSize: 16, fontWeight: '500' }}>{barangay}</Text>
-                        </View>
-                        <Switch
-                          value={isSubscribed}
-                          onValueChange={() => toggleSubscription(barangay, isSubscribed)}
-                          trackColor={{ false: "#767577", true: theme.primary }}
-                          thumbColor={Platform.OS === 'ios' ? '#ffffff' : (isSubscribed ? '#ffffff' : '#f4f3f4')}
-                        />
+                        <Ionicons name="location" size={20} color={theme.primary} />
                       </View>
-                    );
-                  })}
-                </ScrollView>
-              )}
+                      <Text style={{ color: theme.textPrimary, fontSize: 15, fontWeight: '600' }}>{barangay}</Text>
+                      <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} style={{ marginLeft: 'auto' }} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <View style={{ height: 1, backgroundColor: theme.border, marginBottom: 25, opacity: 0.5 }} />
+              </ScrollView>
             </View>
           </View>
         </Modal>
@@ -4906,6 +4943,7 @@ const EvacuationMapScreen = ({ navigation, route }) => {
             { color: "#74C5E6", label: "Route" },
             { color: "#2fb864", label: "Open" },
             { color: "#f59e0b", label: "Full" },
+            { color: "#ef4444", label: "Closed" },
             { color: "#e2463b", label: "Flood zone" },
           ].map(({ color, label }) => (
             <View key={label} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -4960,14 +4998,14 @@ const EvacuationMapScreen = ({ navigation, route }) => {
                 </View>
               </View>
               <View style={{
-                backgroundColor: selectedCenter.status === "open" ? "rgba(47,184,100,0.15)" : "rgba(245,158,11,0.15)",
+                backgroundColor: selectedCenter.status === "open" ? "rgba(47,184,100,0.15)" : (selectedCenter.status === "full" ? "rgba(245,158,11,0.15)" : "rgba(239,68,68,0.15)"),
                 borderRadius: 10, paddingHorizontal: 12, paddingVertical: 5,
               }}>
                 <Text style={{
-                  color: selectedCenter.status === "open" ? "#2fb864" : "#f59e0b",
+                  color: selectedCenter.status === "open" ? "#2fb864" : (selectedCenter.status === "full" ? "#f59e0b" : "#ef4444"),
                   fontSize: 13, fontWeight: "700",
                 }}>
-                  {selectedCenter.status === "open" ? "OPEN" : "FULL"}
+                  {(selectedCenter.status || '').toUpperCase()}
                 </Text>
               </View>
             </View>
@@ -5006,7 +5044,9 @@ const EvacuationMapScreen = ({ navigation, route }) => {
             {selectedCenter.status !== "open" && (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 10 }}>
                 <Feather name="alert-circle" size={12} color="#ef4444" />
-                <Text style={{ color: "#ef4444", fontSize: 12 }}>This center is full — tap another pin to see alternatives.</Text>
+                <Text style={{ color: "#ef4444", fontSize: 12 }}>
+                  {selectedCenter.status === "full" ? "This center is full — tap another pin to see alternatives." : "This center is currently closed."}
+                </Text>
               </View>
             )}
           </Animated.View>
@@ -5255,8 +5295,22 @@ const CustomDrawerContent = (props) => {
                 <Ionicons name={item.icon} size={22} color={isActive ? "#74C5E6" : theme.textPrimary} />
                 <Text style={{ marginLeft: 16, fontSize: 16, fontWeight: isActive ? "700" : "500", color: isActive ? "#74C5E6" : theme.textPrimary }}>{item.label}</Text>
                 {item.badge && (
-                  <View style={{ marginLeft: "auto", backgroundColor: "#e2463b", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 }}>
-                    <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "700" }}>{unreadCount}</Text>
+                  <View style={{
+                    marginLeft: "auto",
+                    backgroundColor: "#e2463b",
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
+                    borderRadius: 10,
+                    minWidth: 24,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    shadowColor: "#e2463b",
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.3,
+                    shadowRadius: 3,
+                    elevation: 3
+                  }}>
+                    <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "900" }}>{unreadCount}</Text>
                   </View>
                 )}
               </TouchableOpacity>
@@ -5425,7 +5479,7 @@ function NotificationProvider({ children }) {
       const itemTime = new Date(data.timestamp || data.created_at).getTime();
       const isRecent = (Date.now() - itemTime) < (5 * 60 * 1000); // 5 mins
       if (!isRecent) return false;
-      
+
       // Additional suppression for polling verified reports to reduce noise
       if (isReport) return false;
     }
@@ -5461,36 +5515,70 @@ function NotificationProvider({ children }) {
 
     socket.on("new_notification", async (data) => {
       console.log("[WS] Received raw notification data:", data);
-      
-      if (!(await shouldShowPopup(data))) return;
-
-      console.log("[WS] Triggering alert popup for:", data.title);
 
       // ── STANDARDIZED ID GENERATION ──
       const isReport = data.type === 'verified_report' || data.type === 'report';
       const rawId = data.id?.toString().replace('alert-', '').replace('report-', '');
       const normalizedId = isReport ? `report-${rawId}` : `alert-${rawId || 'new'}`;
 
+      // ── IMMEDIATE STATE UPDATE: Sub-second badge responsiveness ──
+      const newNotif = {
+        ...data,
+        id: normalizedId,
+        sourceType: isReport ? 'community_report' : 'announcement',
+        icon: isReport ? (data.icon || 'people-outline') : 'megaphone-outline',
+        accent: isReport ? '#74C5E6' : (data.level === 'critical' ? '#e2463b' : data.level === 'warning' ? '#f29339' : '#f5c542'),
+        created_at: data.created_at || data.timestamp || new Date().toISOString(),
+        severity: data.level,
+        location: data.barangay || data.location
+      };
+
+      setNotifications(prev => {
+        const existingIndex = prev.findIndex(n => n.id === normalizedId);
+        if (existingIndex !== -1) {
+          // UPDATE existing notification (crucial for Escalations)
+          const updated = [...prev];
+          updated[existingIndex] = { ...updated[existingIndex], ...newNotif };
+          return updated;
+        }
+        // ADD new notification
+        return [newNotif, ...prev];
+      });
+
+      // ── ESCALATION SYNC: Reset read status to trigger badge/bell indicators ──
+      if (data.type === 'escalation') {
+        setReadIds(prev => prev.filter(id => id !== normalizedId));
+      }
+
+      // If it's an escalation, we ALWAYS want to show the popup even if the ID was shown before
+      const isEscalation = data.type === 'escalation';
+      const showPopup = isEscalation ? true : await shouldShowPopup(newNotif, false);
+
+      if (!showPopup) return;
+
+      // Mark as shown to prevent duplicate triggers
       markPopupAsShown(normalizedId);
 
       // ── CONTENT FORMATTING ──
       let message = "";
-      if (data.type === 'verified_report') {
-        message = `📍 Location: ${data.barangay}\n🔍 Incident: ${data.description}\n🤝 Response: ${data.recommendations || 'LGU is monitoring and responding'}`;
+
+      if (isEscalation) {
+        message = `🚨 STATUS UPGRADE: ${data.barangay || 'Area'}\n📈 New Level: ${data.level ? data.level.toUpperCase() : 'URGENT'}\n\n${data.description || data.message || 'The risk level has been updated.'}`;
+      } else if (data.type === 'verified_report' || data.type === 'report') {
+        message = `📍 Location: ${data.barangay || data.location || 'Not Specified'}\n🔍 Incident: ${data.description || 'Verified community report'}\n🤝 Response: ${data.recommendations || 'LGU is monitoring and responding'}`;
       } else if (data.level === 'evacuation' || data.type === 'evacuation_center') {
         const location = data.location || data.evacuation_location || 'Not Specified';
         const capacity = data.capacity || data.evacuation_capacity || 'N/A';
-        const status = data.evacuation_status || data.status || 'OPEN';
-        message = `📍 Pinned Location: ${location}\n👥 Total Capacity: ${capacity}\n🔄 Status: ${status.toUpperCase()}`;
+        message = `📍 Pinned Location: ${location}\n👥 Total Capacity: ${capacity}`;
       } else {
         const levelLabel = data.level ? data.level.toUpperCase() : 'ADVISORY';
-        message = `📍 Location: ${data.barangay || 'All Areas'}\n⚠️ Risk: ${levelLabel}\n💡 Action: ${data.recommended_action || 'Follow safety protocols'}\n\n${data.description}`;
+        message = `📍 Location: ${data.barangay || 'All Areas'}\n⚠️ Risk: ${levelLabel}\n💡 Action: ${data.recommended_action || 'Follow safety protocols'}\n\n${data.description || data.message || ''}`;
       }
 
       const isEvacuation = data.level === 'evacuation' || data.type === 'evacuation_center';
       const alertTitle = isEvacuation
         ? (data.name || data.title?.replace('New Evacuation Center: ', '') || 'Evacuation Center')
-        : data.title;
+        : (data.title || 'New Alert');
 
       Alert.alert(
         `📢 ${alertTitle}`,
@@ -5499,7 +5587,7 @@ function NotificationProvider({ children }) {
           {
             text: "Dismiss",
             style: "cancel",
-            onPress: () => markAsRead(normalizedId)
+            onPress: () => { }
           },
           {
             text: "View Details",
@@ -5513,14 +5601,20 @@ function NotificationProvider({ children }) {
         ]
       );
 
-      // Refresh list in background
-      setTimeout(() => {
-        fetchNotifications(true);
-      }, 800);
+      // Refresh list in background for full data consistency
+      fetchNotifications(true);
+    });
+
+    socket.on("alert_update", () => {
+      console.log("[WS] Alert change detected, refreshing...");
+      fetchNotifications(true);
     });
 
     return () => {
-      if (socket) socket.off("new_notification");
+      if (socket) {
+        socket.off("new_notification");
+        socket.off("alert_update");
+      }
     };
   }, [socket, shouldShowPopup]);
 
@@ -5593,11 +5687,14 @@ function NotificationProvider({ children }) {
   }, []);
 
   const markAsRead = (id) => {
-    if (!readIds.includes(id)) {
-      const newReadIds = [...readIds, id];
-      setReadIds(newReadIds);
-      saveReadIds(newReadIds);
-    }
+    setReadIds(prev => {
+      if (!prev.includes(id)) {
+        const next = [...prev, id];
+        saveReadIds(next);
+        return next;
+      }
+      return prev;
+    });
   };
 
   const markAllAsRead = () => {
@@ -5605,6 +5702,10 @@ function NotificationProvider({ children }) {
     const newReadIds = Array.from(new Set([...readIds, ...allIds]));
     setReadIds(newReadIds);
     saveReadIds(newReadIds);
+  };
+
+  const removeNotification = (id) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
   };
 
   const clearDropdown = async () => {
@@ -5630,16 +5731,13 @@ function NotificationProvider({ children }) {
         }
       }
 
-      const [alertsRes, reportsRes] = await Promise.all([
-        fetch(alertsUrl),
-        fetch(`${API_BASE}/api/reports/?status=verified`)
+      const [alertsRes] = await Promise.all([
+        fetch(alertsUrl)
       ]);
 
       let alerts = [];
-      let reports = [];
 
       if (alertsRes.ok) alerts = await alertsRes.json();
-      if (reportsRes.ok) reports = await reportsRes.json();
 
       const normalizedAlerts = (alerts || []).map(a => ({
         ...a,
@@ -5650,23 +5748,12 @@ function NotificationProvider({ children }) {
         icon: ' megaphone-outline',
         accent: a.level === 'critical' ? '#e2463b' : a.level === 'warning' ? '#f29339' : '#f5c542',
         displayType: 'ANNOUNCEMENT',
-        time: formatPSTShort(a.created_at)
+        time: formatPSTShort(a.created_at),
+        severity: a.level,
+        location: a.barangay
       }));
 
-      const normalizedReports = (reports || []).map(r => ({
-        ...r,
-        id: `report-${r.id}`,
-        title: r.type,
-        description: r.description,
-        message: `Verified report at ${r.location}`,
-        sourceType: 'community_report',
-        icon: r.icon || 'people-outline',
-        accent: '#74C5E6',
-        displayType: 'COMMUNITY REPORT',
-        time: formatPSTShort(r.created_at)
-      }));
-
-      const combined = [...normalizedAlerts, ...normalizedReports].sort((a, b) =>
+      const combined = [...normalizedAlerts].sort((a, b) =>
         new Date(b.created_at || b.timestamp) - new Date(a.created_at || a.timestamp)
       );
 
@@ -5694,21 +5781,20 @@ function NotificationProvider({ children }) {
           // ── CONTENT FORMATTING (Consistent with Socket listener) ──
           let message = "";
           if (newItem.sourceType === 'community_report') {
-            message = `📍 Location: ${newItem.location}\n🔍 Incident: ${newItem.description}\n🤝 Response: ${newItem.recommendations || 'LGU is responding'}`;
+            message = `📍 Location: ${newItem.location || 'Not Specified'}\n🔍 Incident: ${newItem.description || 'Community report'}\n🤝 Response: ${newItem.recommendations || 'LGU is responding'}`;
           } else if (newItem.level === 'evacuation' || newItem.type === 'evacuation_center') {
             const location = newItem.location || newItem.evacuation_location || 'Not Specified';
             const capacity = newItem.capacity || newItem.evacuation_capacity || 'N/A';
-            const status = newItem.status || newItem.evacuation_status || 'OPEN';
-            message = `📍 Pinned Location: ${location}\n👥 Total Capacity: ${capacity}\n🔄 Status: ${status.toUpperCase()}`;
+            message = `📍 Pinned Location: ${location}\n👥 Total Capacity: ${capacity}`;
           } else {
             const levelLabel = newItem.level ? newItem.level.toUpperCase() : 'ADVISORY';
-            message = `📍 Location: ${newItem.barangay || 'All Areas'}\n⚠️ Risk: ${levelLabel}\n💡 Action: ${newItem.recommended_action || 'Follow safety protocols'}\n\n${newItem.description || newItem.message}`;
+            message = `📍 Location: ${newItem.barangay || 'All Areas'}\n⚠️ Risk: ${levelLabel}\n💡 Action: ${newItem.recommended_action || 'Follow safety protocols'}\n\n${newItem.description || newItem.message || 'No additional details provided.'}`;
           }
 
           const isEvacItem = newItem.level === 'evacuation' || newItem.type === 'evacuation_center';
           const alertTitleFallback = isEvacItem
             ? (newItem.name || newItem.title?.replace('New Evacuation Center: ', '') || 'Evacuation Center')
-            : (newItem.title || newItem.message);
+            : (newItem.title || newItem.message || 'New Alert');
 
           Alert.alert(
             `📢 ${alertTitleFallback}`,
@@ -5717,7 +5803,7 @@ function NotificationProvider({ children }) {
               {
                 text: "Dismiss",
                 style: "cancel",
-                onPress: () => markAsRead(newItem.id)
+                onPress: () => { }
               },
               {
                 text: "View",
@@ -5747,7 +5833,7 @@ function NotificationProvider({ children }) {
   return (
     <NotificationContext.Provider value={{
       notifications, unreadCount, loading, readIds, hiddenIds,
-      markAsRead, markAllAsRead, clearDropdown, refresh: fetchNotifications
+      markAsRead, markAllAsRead, clearDropdown, refresh: fetchNotifications, removeNotification
     }}>
       {children}
     </NotificationContext.Provider>
@@ -6337,29 +6423,76 @@ const getStyles = (theme) => StyleSheet.create({
     fontWeight: "700",
     color: theme.textPrimary,
   },
-  filterRow: {
-    flexDirection: "row",
-    gap: 8,
+  filterContainer: {
     paddingHorizontal: 18,
-    paddingVertical: 8,
+    paddingVertical: 12,
   },
-  filterPill: {
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 999,
+  dropdownTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: theme.surface,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  dropdownTriggerText: {
+    fontSize: 14,
+    color: theme.textPrimary,
+    fontWeight: '600',
+  },
+  dropdownOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  dropdownMenu: {
+    width: '100%',
+    maxWidth: 300,
+    backgroundColor: theme.surface,
+    borderRadius: 20,
+    padding: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  dropdownHeader: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: theme.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+    marginBottom: 6,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  dropdownItemActive: {
     backgroundColor: theme.badgeBg,
   },
-  filterPillActive: {
-    backgroundColor: theme.primary,
-  },
-  filterText: {
-    fontSize: 12,
-    color: theme.textSecondary,
-  },
-  filterTextActive: {
-    fontSize: 12,
+  dropdownItemText: {
+    fontSize: 15,
     color: theme.textPrimary,
-    fontWeight: "600",
+    fontWeight: '500',
+  },
+  dropdownItemTextActive: {
+    color: theme.primary,
+    fontWeight: '700',
   },
   alertSummary: {
     marginHorizontal: 18,
@@ -6605,6 +6738,10 @@ const getStyles = (theme) => StyleSheet.create({
   centerFull: {
     backgroundColor: "rgba(245, 158, 11, 0.1)",
     borderColor: "rgba(245, 158, 11, 0.2)",
+  },
+  centerClosed: {
+    backgroundColor: "rgba(239, 68, 68, 0.1)",
+    borderColor: "rgba(239, 68, 68, 0.2)",
   },
   centerStatusText: {
     fontSize: 10,

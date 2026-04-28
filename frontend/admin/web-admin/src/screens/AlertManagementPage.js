@@ -251,25 +251,36 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
     const confirmDeleteAlert = async () => {
         if (!alertToDelete) return;
+        
+        // Optimistic UI Update: Instant delete
+        const previousAlerts = [...activeAlerts];
+        const deletedAlertName = alertToDelete.title || "Alert";
+        
+        setActiveAlerts(prev => prev.filter(a => a.id !== alertToDelete.id));
+        setShowDeleteModal(false);
+        setSuccessMessage(`Successfully deleted alert: ${deletedAlertName}`);
+        setShowSuccessModal(true);
+        
         setIsSubmitting(true);
         try {
             const response = await authFetch(`${API_BASE_URL}/api/alerts/${alertToDelete.id}`, {
                 method: "DELETE"
             });
             if (response.ok) {
-                setSuccessMessage(`Successfully deleted alert: ${alertToDelete?.title || "Alert"}`);
-                setShowDeleteModal(false);
-                setShowSuccessModal(true);
                 setAlertToDelete(null);
                 fetchActiveAlerts();
                 fetchAlertHistory();
             } else {
-                setErrorMessage(`Failed to delete alert: ${alertToDelete?.title || "Alert"}`);
+                setShowSuccessModal(false);
+                setErrorMessage(`Failed to delete alert: ${deletedAlertName}`);
                 setShowErrorModal(true);
+                setActiveAlerts(previousAlerts);
             }
         } catch (error) {
+            setShowSuccessModal(false);
             setErrorMessage("Network error deleting alert");
             setShowErrorModal(true);
+            setActiveAlerts(previousAlerts);
         } finally {
             setIsSubmitting(false);
         }
@@ -515,9 +526,15 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
     };
 
     const handleDismissReport = async (id, report) => {
-        setIsSubmitting(true);
+        // Full Optimistic UI Update: Instant modal close, list update, AND success feedback
+        const previousVerifications = [...verifications];
+        setVerifications(prev => prev.filter((v) => v.id !== id));
+        setShowReportDetailsModal(false);
+        
+        setSuccessMessage(`Successfully dismissed report from ${report.reporter_name}.`);
+        setShowSuccessModal(true);
+
         try {
-            // Update report status to dismissed
             const response = await authFetch(`${API_BASE_URL}/api/reports/${id}/reject`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -528,21 +545,19 @@ const AlertManagementPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             });
 
             if (response.ok) {
-                setSuccessMessage(`Successfully dismissed report from ${report.reporter_name}. The reporter will be notified.`);
-                setShowReportDetailsModal(false);
-                setShowSuccessModal(true);
-                setVerifications(verifications.filter((v) => v.id !== id));
-                fetchData();
+                fetchData(); // Sync remaining data in background
             } else {
                 const err = await response.json();
+                setShowSuccessModal(false); // Hide the optimistic success if it failed
                 setErrorMessage(err.error || `Error dismissing report from ${report.reporter_name}`);
                 setShowErrorModal(true);
+                setVerifications(previousVerifications);
             }
         } catch (error) {
+            setShowSuccessModal(false);
             setErrorMessage(`Network error dismissing report from ${report.reporter_name}`);
             setShowErrorModal(true);
-        } finally {
-            setIsSubmitting(false);
+            setVerifications(previousVerifications);
         }
     };
 

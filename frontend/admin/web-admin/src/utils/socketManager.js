@@ -13,8 +13,11 @@ export const getSocket = () => {
     console.log("[SocketManager] Creating new persistent socket connection...");
     globalSocket = io(API_BASE_URL, {
       transports: ["websocket", "polling"],
-      timeout: 20000,
-      reconnectionAttempts: 10
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000
     });
     
     globalSocket.on("connect", () => {
@@ -23,6 +26,27 @@ export const getSocket = () => {
     
     globalSocket.on("disconnect", (reason) => {
       console.log("[SocketManager] Persistent WebSocket Disconnected:", reason);
+    });
+    
+    globalSocket.on("force_logout", (data) => {
+      try {
+        const currentId = localStorage.getItem("userId");
+        const currentRole = localStorage.getItem("userRole");
+        if (currentId && currentRole) {
+          const myType = (currentRole === "super_admin" || currentRole === "admin") ? "a" : "u";
+          if (String(currentId) === String(data.id) && myType === data.type) {
+            console.log("[SocketManager] Force logout received for this account.");
+            localStorage.removeItem("authToken");
+            localStorage.removeItem("userRole");
+            localStorage.removeItem("activePage");
+            localStorage.removeItem("userId");
+            sessionStorage.removeItem("welcomeBannerShown");
+            window.location.reload();
+          }
+        }
+      } catch (error) {
+        console.warn("Error processing force_logout:", error);
+      }
     });
   }
   return globalSocket;

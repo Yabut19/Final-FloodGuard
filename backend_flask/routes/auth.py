@@ -11,13 +11,7 @@ logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint('auth', __name__)
 
-def _emit_user_update():
-    """Broadcast user list change to all WebSocket clients."""
-    try:
-        from socket_instance import socketio
-        socketio.emit("user_update", {"message": "refresh"}, namespace="/")
-    except Exception:
-        pass
+from socket_instance import emit_user_update
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
@@ -44,18 +38,20 @@ def login():
             logger.warning("Login blocked for inactive account: %s", username)
             return jsonify({"error": "Account is inactive. Please contact support."}), 403
         
-        # --- Strict Role Validation ---
+        # --- Strict Role-Based Access Control (RBAC) ---
         if required_role == 'admin':
-            if user.role != 'super_admin':
+            # Web Admin Portal login
+            if user.role not in ('super_admin', 'admin'):
                  return jsonify({"error": "Unauthorized: Admin access required."}), 403
         elif required_role == 'lgu':
-            if user.role != 'lgu_admin':
+            # Web LGU Portal login
+            if user.role not in ('lgu_admin', 'lgu'):
                  return jsonify({"error": "Unauthorized: LGU Moderator access required."}), 403
         elif not required_role:
-             # Default mobile app behavior (usually allow 'user')
-             if user.role not in ['user', 'lgu_admin', 'super_admin']:
-                  return jsonify({"error": "Unauthorized account."}), 403
-        # -------------------------------
+            # Mobile App login (Strictly regular users only)
+            if user.role != 'user':
+                return jsonify({"error": "LGU and Admin accounts are restricted to web access only."}), 403
+        # ----------------------------------------------
         
         token = jwt.encode({
             'user_id': user.id,
@@ -152,7 +148,7 @@ def register():
 
         threading.Thread(target=_send_email_bg, daemon=True).start()
         
-        _emit_user_update()
+        emit_user_update()
         
         return jsonify({
             "message": "Account created! Check your email for your temporary password.",
@@ -196,7 +192,7 @@ def change_password():
         """, (new_hash, user_id))
         db.commit()
         
-        _emit_user_update()
+        emit_user_update()
         
         return jsonify({"message": "Password updated successfully"}), 200
     except Exception as e:

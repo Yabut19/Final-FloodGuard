@@ -26,11 +26,16 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
         super_admins: 0
     });
 
-    const SITIOS_MABOLO = [
-        "Almendras", "Banilad (Mabolo)", "Cabantan", "Casals Village",
-        "Castle Peak", "Holy Name", "M.J. Cuenco", "Panagdait",
-        "San Isidro", "San Roque", "San Vicente", "Santo Niño",
-        "Sindulan", "Soriano", "Tres Borces"
+    const OFFICIAL_LOCATIONS = [
+        "Sitio Magtalisay",
+        "Sitio Regla",
+        "Sitio Sinulog",
+        "Sitio Laray Holy Name",
+        "Sitio San Vicente",
+        "Sitio San Isidro",
+        "Sitio Fatima",
+        "Sitio Sindulan",
+        "Sitio Lahing-Lahing (Uno and Dos)"
     ];
     const [showSitioDropdown, setShowSitioDropdown] = useState(false);
 
@@ -77,45 +82,17 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
             }
         };
 
-        const fetchLocations = async () => {
-            try {
-                // Fetch both locations and sensors to filter out sensor names from the dropdown
-                const [locRes, sensorRes] = await Promise.all([
-                    authFetch(`${API_BASE_URL}/api/admin/locations`),
-                    authFetch(`${API_BASE_URL}/api/iot/sensors`)
-                ]);
 
-                if (locRes.ok) {
-                    let locations = await locRes.json();
-
-                    if (sensorRes.ok) {
-                        const sensorData = await sensorRes.json();
-                        const sensorsList = sensorData.sensors || [];
-                        const sensorNames = sensorsList.map(s => s.name?.toLowerCase());
-                        const sensorIds = sensorsList.map(s => s.id?.toLowerCase());
-
-                        // Filter out any locations that match sensor names, IDs, or contain "Sensor"
-                        locations = locations.filter(loc => {
-                            if (!loc) return false;
-                            const lowLoc = loc.toLowerCase();
-                            return !sensorNames.includes(lowLoc) &&
-                                !sensorIds.includes(lowLoc) &&
-                                !lowLoc.includes("sensor");
-                        });
-                    }
-
-                    setAvailableLocations(locations);
-                }
-            } catch (e) {
-                console.error("Failed to fetch locations:", e);
-            }
-        };
 
         fetchUsers();
         fetchSystemStatus();
-        fetchLocations();
+
         const interval = setInterval(fetchSystemStatus, 30000);
-        return () => clearInterval(interval);
+        const userInterval = setInterval(fetchUsers, 3000); // Polling for real-time users update
+        return () => {
+            clearInterval(interval);
+            clearInterval(userInterval);
+        };
     }, []);
 
     // ── Real-time Data Synchronization ──
@@ -171,13 +148,14 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
     const [showSuccessModal, setShowSuccessModal] = useState(false);
     const [successMessage, setSuccessMessage] = useState("");
     const [createdUserEmail, setCreatedUserEmail] = useState("");
-    const [availableLocations, setAvailableLocations] = useState(SITIOS_MABOLO);
+    const [availableLocations, setAvailableLocations] = useState(OFFICIAL_LOCATIONS);
     const [lguForm, setLguForm] = useState({
         full_name: "",
         email: "",
         role: "lgu_admin", // Default for new accounts
         barangay: "",
-        password: ""
+        password: "",
+        confirm_password: ""
     });
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showErrorModal, setShowErrorModal] = useState(false);
@@ -237,7 +215,7 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     full_name: editForm.full_name,
-                    barangay: editForm.barangay,
+                    barangay: editForm.role === 'user' ? editForm.barangay : "",
                     password: editForm.password
                 })
             });
@@ -312,31 +290,38 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
     const handleAddUserClick = () => {
         setShowAddLGUModal(true);
     };
-
     const handleCreateUser = async () => {
-        // Enforce required validation on all form fields except password
+        // Enforce required validation on all form fields
         if (!lguForm.full_name || !lguForm.email || !lguForm.role) {
             setErrorMessage("Please fill in all required fields marked with *");
             setShowErrorModal(true);
             return;
         }
 
-        // Location is required for all roles except super_admin
-        if (lguForm.role !== 'super_admin' && !lguForm.barangay) {
+        // Location is required only for regular users
+        if (lguForm.role === 'user' && !lguForm.barangay) {
             setErrorMessage("Please fill in all required fields marked with *");
             setShowErrorModal(true);
             return;
         }
 
-        // Automatic temporary password generation if empty
-        let finalPassword = lguForm.password;
-        if (!finalPassword) {
-            finalPassword = "FloodGuard" + Math.floor(1000 + Math.random() * 9000);
+        // Password Validation
+        if (!lguForm.password) {
+            setErrorMessage("Password is required.");
+            setShowErrorModal(true);
+            return;
+        }
+
+        if (lguForm.password !== lguForm.confirm_password) {
+            setErrorMessage("Passwords do not match.");
+            setShowErrorModal(true);
+            return;
         }
 
         const payload = {
             ...lguForm,
-            password: finalPassword,
+            barangay: lguForm.role === 'user' ? lguForm.barangay : "",
+            password: lguForm.password,
             phone: ""
         };
 
@@ -355,7 +340,7 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                 setSuccessMessage(`Successfully created account for ${lguForm.full_name}. Verification link and default password sent.`);
                 setShowAddLGUModal(false);
                 setShowSuccessModal(true);
-                setLguForm({ full_name: "", email: "", role: "lgu_admin", barangay: "", password: "" });
+                setLguForm({ full_name: "", email: "", role: "lgu_admin", barangay: "", password: "", confirm_password: "" });
                 fetchUsers();
             } else {
                 setErrorMessage(data.error || "Failed to create account");
@@ -539,7 +524,7 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                                         </View>
 
                                         <View style={styles.userColLocation}>
-                                            <Text style={styles.userCellText}>{user.location}</Text>
+                                            <Text style={styles.userCellText}>{user.role === 'User' ? (user.location || "N/A") : "N/A"}</Text>
                                         </View>
 
                                         <View style={styles.userColStatus}>
@@ -660,7 +645,7 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                                         </View>
                                     </View>
 
-                                    {lguForm.role !== 'super_admin' && (
+                                    {lguForm.role === 'user' && (
                                         <View style={[pg.formGroup, { zIndex: 1000 }]}>
                                             <Text style={pg.formLabel}>Location (Sitio) <Text style={{ color: "#dc2626" }}>*</Text></Text>
                                             <TouchableOpacity
@@ -715,16 +700,29 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                                         </View>
                                     )}
 
-                                    <View style={pg.formGroup}>
-                                        <Text style={pg.formLabel}>Password <Text style={{ fontSize: 11, color: "#94a3b8", fontFamily: "Poppins_400Regular" }}>(Optional - auto-generated if empty)</Text></Text>
-                                        <TextInput
-                                            style={pg.formInput}
-                                            placeholder="Leave blank to auto-generate"
-                                            placeholderTextColor="#94a3b8"
-                                            secureTextEntry={true}
-                                            value={lguForm.password}
-                                            onChangeText={(text) => setLguForm({ ...lguForm, password: text })}
-                                        />
+                                    <View style={pg.formGrid}>
+                                        <View style={pg.formGroup}>
+                                            <Text style={pg.formLabel}>Enter Password <Text style={{ color: "#dc2626" }}>*</Text></Text>
+                                            <TextInput
+                                                style={pg.formInput}
+                                                placeholder="Enter password"
+                                                placeholderTextColor="#94a3b8"
+                                                secureTextEntry={true}
+                                                value={lguForm.password}
+                                                onChangeText={(text) => setLguForm({ ...lguForm, password: text })}
+                                            />
+                                        </View>
+                                        <View style={pg.formGroup}>
+                                            <Text style={pg.formLabel}>Confirm Password <Text style={{ color: "#dc2626" }}>*</Text></Text>
+                                            <TextInput
+                                                style={pg.formInput}
+                                                placeholder="Confirm password"
+                                                placeholderTextColor="#94a3b8"
+                                                secureTextEntry={true}
+                                                value={lguForm.confirm_password}
+                                                onChangeText={(text) => setLguForm({ ...lguForm, confirm_password: text })}
+                                            />
+                                        </View>
                                     </View>
                                 </ScrollView>
 
@@ -790,8 +788,8 @@ const UserManagementPage = ({ onNavigate, onLogout, userRole = "superadmin" }) =
                                         />
                                     </View>
 
-                                    {/* Location Dropdown (Available for LGUs and Mobile Users) */}
-                                    {editingUser?.id?.startsWith('u-') && (
+                                    {/* Location Dropdown (Available only for Mobile Users) */}
+                                    {editForm.role === 'user' && (
                                         <View style={{ marginBottom: 16, zIndex: 2000 }}>
                                             <Text style={{ fontSize: 13, fontFamily: "Poppins_600SemiBold", color: "#334155", marginBottom: 8 }}>
                                                 Location (Sitio) <Text style={{ color: "#dc2626" }}>*</Text>

@@ -6,13 +6,7 @@ from config import Config
 
 user_bp = Blueprint('user', __name__)
 
-def _emit_user_update():
-    """Broadcast user list change to all WebSocket clients."""
-    try:
-        from app import socketio
-        socketio.emit("user_update", {"message": "refresh"})
-    except Exception:
-        pass
+from socket_instance import emit_user_update
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 
@@ -100,7 +94,7 @@ def upload_avatar(user_id):
             
             db.commit()
             
-            _emit_user_update()
+            emit_user_update()
             
             return jsonify({
                 "message": "Avatar updated successfully",
@@ -124,7 +118,7 @@ def delete_avatar(user_id):
         else:
             cursor.execute("UPDATE users SET avatar_url = NULL WHERE id = %s", (user_id,))
         db.commit()
-        _emit_user_update()
+        emit_user_update()
         return jsonify({"message": "Avatar removed successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -140,24 +134,33 @@ def update_user_profile(user_id):
     email = data.get('email')
     phone = data.get('phone')
     
-    if not full_name or not email:
-        return jsonify({"error": "Name and Email are required"}), 400
-        
     db = get_db()
-    cursor = db.cursor()
+    cursor = db.cursor(dictionary=True)
     
+    # Get current data to support partial updates
     try:
         if user_type == 'admin':
-             # Admins table: id, username, role, ...
-             # We map 'email' from frontend to 'username' here.
-             # Check if username exists for OTHER admins
-             # Update username, full_name and phone for admins
+            cursor.execute("SELECT username, full_name, phone FROM admins WHERE id = %s", (user_id,))
+            current = cursor.fetchone()
+        else:
+            cursor.execute("SELECT email, full_name, phone, barangay FROM users WHERE id = %s", (user_id,))
+            current = cursor.fetchone()
+            
+        if not current:
+            return jsonify({"error": "User not found"}), 404
+            
+        # Merge current data with new data from request
+        full_name = data.get('full_name', current['full_name'])
+        email = data.get('email', current['email'] if user_type == 'user' else current['username'])
+        phone = data.get('phone', current['phone'])
+        barangay = data.get('barangay', current.get('barangay') if user_type == 'user' else None)
+
+        if user_type == 'admin':
              cursor.execute("""
                 UPDATE admins 
                 SET username = %s, full_name = %s, phone = %s 
                 WHERE id = %s
              """, (email, full_name, phone, user_id))
-             
         else:
             # Check if email is already taken by another user
             cursor.execute("SELECT id FROM users WHERE email = %s AND id != %s", (email, user_id))
@@ -166,13 +169,13 @@ def update_user_profile(user_id):
                 
             cursor.execute("""
                 UPDATE users 
-                SET full_name = %s, email = %s, phone = %s 
+                SET full_name = %s, email = %s, phone = %s, barangay = %s 
                 WHERE id = %s
-            """, (full_name, email, phone, user_id))
+            """, (full_name, email, phone, barangay, user_id))
         
         db.commit()
         
-        _emit_user_update()
+        emit_user_update()
         
         return jsonify({"message": "Profile updated successfully"}), 200
         

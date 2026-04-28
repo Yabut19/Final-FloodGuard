@@ -169,6 +169,21 @@ def escalate_alert(alert_id):
     cursor2.close()
     cursor.close()
 
+    # ── REAL-TIME BROADCAST: Notify all mobile apps of the escalation ──
+    try:
+        from socket_instance import socketio
+        socketio.emit("new_notification", {
+            "type": "escalation",
+            "id": f"alert-{alert_id}",
+            "title": f"⚠️ ALERT ESCALATED: {alert['title']}",
+            "description": f"Severity has been upgraded from {current_level.upper()} to {new_level.upper()}.\nReason: Manual escalation by LGU/Admin.",
+            "level": new_level,
+            "barangay": alert['barangay'],
+            "timestamp": get_pst_now().isoformat()
+        }, namespace="/")
+    except Exception as e:
+        print(f"[WS ERROR] Failed to emit escalation: {e}")
+
     return jsonify({
         "message": f"Alert escalated from '{current_level}' to '{new_level}'",
         "alert_id": alert_id,
@@ -274,6 +289,21 @@ def auto_escalate():
                  f'Auto-escalated: {count} verified reports in last 6h')
             )
             db.commit()
+            
+            # Emit socket for escalation
+            try:
+                from socket_instance import socketio
+                socketio.emit("new_notification", {
+                    "type": "escalation",
+                    "id": f"alert-{existing['id']}",
+                    "title": f"⚠️ ALERT ESCALATED: {barangay}",
+                    "description": f"Severity auto-escalated to {target_level.upper()} due to increasing verified reports.",
+                    "level": target_level,
+                    "barangay": barangay,
+                    "timestamp": get_pst_now().isoformat()
+                }, namespace="/")
+            except: pass
+
             results.append({
                 "barangay": barangay,
                 "action": "escalated",
@@ -306,6 +336,21 @@ def auto_escalate():
                  f'Auto-created: {count} verified reports in last 6h')
             )
             db.commit()
+
+            # Emit socket for creation
+            try:
+                from socket_instance import socketio
+                socketio.emit("new_notification", {
+                    "type": "alert",
+                    "id": f"alert-{new_id}",
+                    "title": f"📢 NEW ALERT: {barangay}",
+                    "description": f"New flood alert issued for your area (Level: {target_level.upper()}).",
+                    "level": target_level,
+                    "barangay": barangay,
+                    "timestamp": get_pst_now().isoformat()
+                }, namespace="/")
+            except: pass
+
             results.append({
                 "barangay": barangay,
                 "action": "created",

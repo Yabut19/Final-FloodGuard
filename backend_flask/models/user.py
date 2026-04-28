@@ -138,11 +138,4 @@ class User:
             except Exception:
                 pass
 
-        # Legacy fallback for older scrypt-style defaults (if still stored in plain fallback pattern).
-        # We keep this fallback for compatibility with earlier migration defaults.
-        if isinstance(self.password_hash, str) and self.password_hash.startswith('scrypt:'):
-            default_pass = os.getenv('ADMIN_DEFAULT_PASSWORD', 'admin123')
-            if password == default_pass:
-                return True
-
         return False

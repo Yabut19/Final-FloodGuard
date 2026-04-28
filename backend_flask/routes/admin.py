@@ -6,11 +6,13 @@ from utils.auth_middleware import admin_required, lgu_or_admin_required
 
 admin_bp = Blueprint('admin', __name__)
 
-def _emit_user_update():
-    """Broadcast user list change to all WebSocket clients."""
+from socket_instance import emit_user_update
+
+def _emit_force_logout(db_id, type_char):
+    """Force a specific user to be logged out."""
     try:
         from socket_instance import socketio
-        socketio.emit("user_update", {"message": "refresh"}, namespace="/")
+        socketio.emit("force_logout", {"id": str(db_id), "type": type_char}, namespace="/")
     except Exception:
         pass
 
@@ -111,7 +113,7 @@ def create_user(current_user):
 
         threading.Thread(target=_send_bg, daemon=True).start()
         
-        _emit_user_update()
+        emit_user_update()
         
         return jsonify({
             "message": f"Account with role '{role}' created successfully",
@@ -178,7 +180,8 @@ def delete_user(current_user, user_id):
 
         cursor.execute(f"DELETE FROM {table} WHERE id = %s", (db_id,))
         db.commit()
-        _emit_user_update()
+        emit_user_update()
+        _emit_force_logout(db_id, 'u' if table == 'users' else 'a')
         return jsonify({"message": "User deleted successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -243,7 +246,7 @@ def update_user_details(current_user, user_id):
             return jsonify({"error": "Invalid user ID format"}), 400
             
         db.commit()
-        _emit_user_update()
+        emit_user_update()
         return jsonify({"message": "User details updated successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -273,7 +276,9 @@ def update_user_status(current_user, user_id):
 
         cursor.execute(f"UPDATE {table} SET status = %s WHERE id = %s", (new_status, db_id))
         db.commit()
-        _emit_user_update()
+        emit_user_update()
+        if new_status == 'inactive':
+            _emit_force_logout(db_id, 'u' if table == 'users' else 'a')
         return jsonify({"message": "Status updated successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -305,7 +310,7 @@ def update_user_role(current_user, user_id):
         if new_role in ['user', 'lgu_admin', 'super_admin', 'admin']:
             cursor.execute(f"UPDATE {table} SET role = %s WHERE id = %s", (new_role, db_id))
             db.commit()
-            _emit_user_update()
+            emit_user_update()
             return jsonify({"message": "Role updated successfully"}), 200
         else:
             return jsonify({"error": "Invalid role specified"}), 400
