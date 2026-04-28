@@ -5516,6 +5516,27 @@ function NotificationProvider({ children }) {
     socket.on("new_notification", async (data) => {
       console.log("[WS] Received raw notification data:", data);
 
+      if (data.type === 'dismissed_report') {
+        if (!data.reporter_email) {
+          console.log("[WS] Ignoring dismissed report because it has no target email.");
+          return;
+        }
+        try {
+          const storedUser = await AsyncStorage.getItem("userData");
+          if (storedUser) {
+            const parsedUser = JSON.parse(storedUser);
+            if (data.reporter_email !== parsedUser.email) {
+              console.log("[WS] Ignoring dismissed report for another user:", data.reporter_email);
+              return;
+            }
+          } else {
+            return;
+          }
+        } catch (e) {
+          console.error("Error checking user email for dismissal:", e);
+        }
+      }
+
       // ── STANDARDIZED ID GENERATION ──
       const isReport = data.type === 'verified_report' || data.type === 'report';
       const rawId = data.id?.toString().replace('alert-', '').replace('report-', '');

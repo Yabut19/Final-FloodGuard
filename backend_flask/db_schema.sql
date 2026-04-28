@@ -210,12 +210,12 @@ ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Seed data — default admin accounts
 -- Default password for admin@system.com : admin123
--- Default password for moderator@lgu.gov: password123
+-- Default password for moderator@lgu.gov: admin123
 -- ─────────────────────────────────────────────────────────────────────────────
 INSERT INTO `admins` (`username`, `full_name`, `password`, `role`) VALUES
-('admin@system.com', 'Super Admin', 'scrypt:32768:8:1$12Jjtqo4$c62fa32f70f45d0029c304ba7eb5982d37748c', 'super_admin')
+('admin@system.com', 'Super Admin', 'scrypt:32768:8:1$ZDBkHJd4KyTYoL12$10ef0289649ca3772fc03c48022f544ce0cbccaa6df90236ca5760f8d4bb4406f6461fb217e45cdf25f3a22d096dd12e3fcd5859a3e2e817f28aa1396a701d3d', 'super_admin')
 ON DUPLICATE KEY UPDATE password=VALUES(password), role=VALUES(role);
 
 INSERT INTO `admins` (`username`, `full_name`, `password`, `role`) VALUES
-('moderator@lgu.gov', 'LGU Moderator', 'scrypt:32768:8:1$kJCjfddr$kF', 'lgu_admin')
+('moderator@lgu.gov', 'LGU Moderator', 'scrypt:32768:8:1$ZDBkHJd4KyTYoL12$10ef0289649ca3772fc03c48022f544ce0cbccaa6df90236ca5760f8d4bb4406f6461fb217e45cdf25f3a22d096dd12e3fcd5859a3e2e817f28aa1396a701d3d', 'lgu_admin')
 ON DUPLICATE KEY UPDATE password=VALUES(password), role=VALUES(role);

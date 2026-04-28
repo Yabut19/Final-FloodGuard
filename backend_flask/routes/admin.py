@@ -8,6 +8,8 @@ admin_bp = Blueprint('admin', __name__)
 
 from socket_instance import emit_user_update
 
+PROTECTED_ADMINS = ['admin@system.com', 'moderator@lgu.gov']
+
 def _emit_force_logout(db_id, type_char):
     """Force a specific user to be logged out."""
     try:
@@ -178,6 +180,13 @@ def delete_user(current_user, user_id):
         else:
             return jsonify({"error": "Invalid user ID format"}), 400
 
+        # Protect default admins
+        if table == 'admins':
+            cursor.execute("SELECT username FROM admins WHERE id = %s", (db_id,))
+            res = cursor.fetchone()
+            if res and res[0] in PROTECTED_ADMINS:
+                return jsonify({"error": "This default system account cannot be deleted."}), 403
+
         cursor.execute(f"DELETE FROM {table} WHERE id = %s", (db_id,))
         db.commit()
         emit_user_update()
@@ -240,6 +249,13 @@ def update_user_details(current_user, user_id):
                     cursor.execute("UPDATE users SET password = %s WHERE id = %s", (generate_password_hash(password), db_id))
         elif user_id.startswith('a-'):
             db_id = user_id[2:]
+            
+            # Protect default admins
+            cursor.execute("SELECT username FROM admins WHERE id = %s", (db_id,))
+            res = cursor.fetchone()
+            if res and res[0] in PROTECTED_ADMINS:
+                return jsonify({"error": "This default system account details cannot be modified via the dashboard."}), 403
+                
             # admins table usually doesn't have barangay
             cursor.execute("UPDATE admins SET full_name = %s WHERE id = %s", (full_name, db_id))
         else:
@@ -274,6 +290,13 @@ def update_user_status(current_user, user_id):
         else:
              return jsonify({"error": "Invalid user ID format"}), 400
 
+        # Protect default admins
+        if table == 'admins':
+            cursor.execute("SELECT username FROM admins WHERE id = %s", (db_id,))
+            res = cursor.fetchone()
+            if res and res[0] in PROTECTED_ADMINS:
+                return jsonify({"error": "This default system account status cannot be changed."}), 403
+
         cursor.execute(f"UPDATE {table} SET status = %s WHERE id = %s", (new_status, db_id))
         db.commit()
         emit_user_update()
@@ -305,6 +328,13 @@ def update_user_role(current_user, user_id):
             db_id = user_id[2:]
         else:
             return jsonify({"error": "Invalid user ID format"}), 400
+
+        # Protect default admins
+        if table == 'admins':
+            cursor.execute("SELECT username FROM admins WHERE id = %s", (db_id,))
+            res = cursor.fetchone()
+            if res and res[0] in PROTECTED_ADMINS:
+                return jsonify({"error": "This default system account role cannot be changed."}), 403
 
         # valid roles: 'user', 'lgu_admin', 'super_admin', 'admin'
         if new_role in ['user', 'lgu_admin', 'super_admin', 'admin']:

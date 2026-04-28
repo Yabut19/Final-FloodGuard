@@ -448,7 +448,8 @@ def reject_report(report_id):
             "id": report_id,
             "title": "Report Dismissed",
             "description": f"Your report regarding {report['type']} at {report['location']} has been reviewed and dismissed.",
-            "location": report['location']
+            "location": report['location'],
+            "reporter_email": reporter_email
         }, namespace="/")
     except Exception as e:
         logger.error("Failed to emit dismissal notification: %s", e)

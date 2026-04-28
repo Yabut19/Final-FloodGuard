@@ -10,6 +10,24 @@ def get_db_connection():
         database=Config.DB_NAME
     )
 
+def seed_permanent_admins(conn, cursor):
+    """Ensure original admin accounts always exist with the correct credentials."""
+    admins = [
+        ('admin@system.com', 'Super Admin', 'scrypt:32768:8:1$ZDBkHJd4KyTYoL12$10ef0289649ca3772fc03c48022f544ce0cbccaa6df90236ca5760f8d4bb4406f6461fb217e45cdf25f3a22d096dd12e3fcd5859a3e2e817f28aa1396a701d3d', 'super_admin'),
+        ('moderator@lgu.gov', 'LGU Moderator', 'scrypt:32768:8:1$ZDBkHJd4KyTYoL12$10ef0289649ca3772fc03c48022f544ce0cbccaa6df90236ca5760f8d4bb4406f6461fb217e45cdf25f3a22d096dd12e3fcd5859a3e2e817f28aa1396a701d3d', 'lgu_admin')
+    ]
+    for username, full_name, password, role in admins:
+        cursor.execute("""
+            INSERT INTO admins (username, full_name, password, role)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE 
+            password = VALUES(password),
+            role = VALUES(role),
+            full_name = VALUES(full_name)
+        """, (username, full_name, password, role))
+    conn.commit()
+    print("  [migration] Permanent admins ensured")
+
 def run_migrations(conn=None, cursor=None):
     """Add any columns/tables that are in the schema but missing from the live DB."""
     _owns_conn = conn is None
@@ -50,6 +68,9 @@ def run_migrations(conn=None, cursor=None):
             print(f"  [migration] Added `{table}`.`{column}`")
         else:
             print(f"  [migration] `{table}`.`{column}` already exists — skipped")
+
+    # Ensure default admins are restored
+    seed_permanent_admins(conn, cursor)
 
     if _owns_conn:
         cursor.close()
