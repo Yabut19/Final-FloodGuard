@@ -59,7 +59,7 @@ export const useTheme = () => useContext(ThemeContext);
 const LocationContext = createContext(null);
 const useUserLocation = () => useContext(LocationContext);
 
-const API_BASE = "http://10.199.140.238:5000"; // Global API base URL
+const API_BASE = "http://10.177.211.238:5000"; // Global API base URL
 
 const UserDataContext = createContext(null);
 export const useUserData = () => useContext(UserDataContext);
