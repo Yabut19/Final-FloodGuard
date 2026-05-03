@@ -33,11 +33,21 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
         }
         return [];
     });
-    const [thresholds, setThresholds] = useState({ advisory_level: 15, warning_level: 30, critical_level: 50 });
+    const [thresholds, setThresholds] = useState({ advisory_level: 15, warning_level: 30, critical_level: 50, measurement_unit: "cm" });
     const [loading, setLoading] = useState(true);
     const [userName, setUserName] = useState("Admin");
     const refreshRef = useRef(null);
     
+    const unit = thresholds.measurement_unit || "cm";
+
+    // ── Helper: Format value based on current unit ──
+    const formatVal = (val) => {
+        if (val === null || val === undefined || val === "") return "0.00";
+        let numericVal = typeof val === 'string' ? parseFloat(val.replace(/[^\d.]/g, '')) : Number(val);
+        if (isNaN(numericVal)) return "0.00";
+        if (unit === "m") return (numericVal / 100).toFixed(2);
+        return numericVal.toFixed(1);
+    };
 
     useEffect(() => {
         if (typeof window !== "undefined" && window.localStorage) {
@@ -227,7 +237,7 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
         { label: "Active Sensors", value: stats.active_sensors, icon: "cpu", iconBg: "#dbeafe", iconColor: "#2563eb", sub: `${onlineSensors} online now` },
         { label: "Active Alerts", value: stats.active_alerts, icon: "alert-triangle", iconBg: "#fee2e2", iconColor: "#dc2626", sub: stats.active_alerts === 0 ? "All clear" : "Requires attention" },
         { label: "Registered Users", value: stats.registered_users.toLocaleString(), icon: "users", iconBg: "#dcfce7", iconColor: "#16a34a", sub: "Mobile app users" },
-        { label: "Avg Water Level", value: `${Number(stats.avg_water_level || 0).toFixed(1)} cm`, icon: "trending-up", iconBg: "#f3e8ff", iconColor: "#7c3aed", sub: "Across all sensors" },
+        { label: "Avg Water Level", value: `${formatVal(stats.avg_water_level)} ${unit}`, icon: "trending-up", iconBg: "#f3e8ff", iconColor: "#7c3aed", sub: "Across all sensors" },
     ];
 
     return (
@@ -267,7 +277,7 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
                                 </View>
                             ))}
                         </View>
-
+ 
                         {/* Live Sensor Gauges */}
                         <LiveSensorStatus sensors={liveSensors} thresholds={thresholds} />
 
@@ -345,10 +355,10 @@ const SuperAdminDashboard = ({ onNavigate, onLogout, activePage = "overview" }) 
                                                     <Text style={styles.dashboardSensorMeta}>
                                                         Brgy. {sensor.location || "—"} ·{" "}
                                                         <Text style={styles.dashboardSensorMetaStrong}>
-                                                            {(isOffline || isOff) ? "0.0 cm" : `Flood: ${Number(sensor.waterLevel || 0).toFixed(1)} cm`}
+                                                            {(isOffline || isOff) ? `0.0 ${unit}` : `Flood: ${formatVal(sensor.waterLevel)} ${unit}`}
                                                         </Text>
                                                         {(!isOffline && !isOff) && (
-                                                            <Text> · Raw: <Text style={styles.dashboardSensorMetaStrong}>{Number(sensor.rawDistance || 0).toFixed(1)} cm</Text></Text>
+                                                            <Text> · Raw: <Text style={styles.dashboardSensorMetaStrong}>{formatVal(sensor.rawDistance)} {unit}</Text></Text>
                                                         )}
                                                     </Text>
                                                 </View>

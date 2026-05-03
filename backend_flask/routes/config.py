@@ -9,9 +9,10 @@ def get_thresholds():
         from utils.thresholds import get_current_thresholds
         thresholds = get_current_thresholds()
         return jsonify({
-            "advisory_level": int(thresholds["advisory_cm"]),
-            "warning_level": int(thresholds["warning_cm"]),
-            "critical_level": int(thresholds["critical_cm"])
+            "advisory_level": thresholds["advisory_cm"],
+            "warning_level": thresholds["warning_cm"],
+            "critical_level": thresholds["critical_cm"],
+            "measurement_unit": thresholds.get("measurement_unit", "cm")
         }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -22,6 +23,7 @@ def update_thresholds():
     adv = data.get("advisory_level")
     warn = data.get("warning_level")
     crit = data.get("critical_level")
+    unit = data.get("measurement_unit", "cm")
 
     if adv is None or warn is None or crit is None:
         return jsonify({"error": "Missing thresholds"}), 400
@@ -32,6 +34,7 @@ def update_thresholds():
         cur.execute("INSERT INTO system_config (config_key, config_value) VALUES ('advisory_level', %s) ON DUPLICATE KEY UPDATE config_value=VALUES(config_value)", (str(adv),))
         cur.execute("INSERT INTO system_config (config_key, config_value) VALUES ('warning_level', %s) ON DUPLICATE KEY UPDATE config_value=VALUES(config_value)", (str(warn),))
         cur.execute("INSERT INTO system_config (config_key, config_value) VALUES ('critical_level', %s) ON DUPLICATE KEY UPDATE config_value=VALUES(config_value)", (str(crit),))
+        cur.execute("INSERT INTO system_config (config_key, config_value) VALUES ('measurement_unit', %s) ON DUPLICATE KEY UPDATE config_value=VALUES(config_value)", (unit,))
         db.commit()
         
         # Force refresh in-memory thresholds immediately
@@ -44,7 +47,8 @@ def update_thresholds():
             socketio.emit("threshold_update", {
                 "advisory_level": adv,
                 "warning_level": warn,
-                "critical_level": crit
+                "critical_level": crit,
+                "measurement_unit": unit
             }, namespace="/")
         except Exception as ws_err:
             print(f"[WS] Threshold broadcast failed: {ws_err}")
@@ -54,7 +58,8 @@ def update_thresholds():
             "thresholds": {
                 "advisory_level": adv,
                 "warning_level": warn,
-                "critical_level": crit
+                "critical_level": crit,
+                "measurement_unit": unit
             }
         }), 200
     except Exception as e:

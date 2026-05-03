@@ -57,13 +57,14 @@ def set_thresholds():
     mapping = {
         "advisory_cm": "advisory_level",
         "warning_cm": "warning_level",
-        "critical_cm": "critical_level"
+        "critical_cm": "critical_level",
+        "measurement_unit": "measurement_unit"
     }
     
     try:
         for key, db_key in mapping.items():
             if key in data:
-                val = float(data[key])
+                val = data[key]
                 _thresholds[key] = val
                 updated[key] = val
                 cur.execute(
@@ -79,7 +80,8 @@ def set_thresholds():
             socketio.emit("threshold_update", {
                 "advisory_level": _thresholds["advisory_cm"],
                 "warning_level": _thresholds["warning_cm"],
-                "critical_level": _thresholds["critical_cm"]
+                "critical_level": _thresholds["critical_cm"],
+                "measurement_unit": _thresholds.get("measurement_unit", "cm")
             }, namespace="/")
         except:
             pass

@@ -48,6 +48,7 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
 
     // Helper: Get latest sensor reading for a location
     const getLatestSensorReading = (location) => {
+        const unit = thresholds.measurement_unit || "cm";
         if (!location) return "N/A";
         const cleanLoc = location.replace(/^(Brgy\.?|Barangay)\s+/i, '').trim().toLowerCase();
 
@@ -59,21 +60,37 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
         });
 
         if (sensor && sensor.is_live && sensor.enabled !== false) {
-            return `${sensor.flood_level ?? 0} cm`;
+            const val = unit === "m" ? (Number(sensor.flood_level ?? 0) / 100).toFixed(2) : Number(sensor.flood_level ?? 0).toFixed(1);
+            return `${val} ${unit}`;
         }
         return "N/A";
     };
 
     // ── Thresholds & Classification ──────────────────────────
-    const [thresholds, setThresholds] = useState({ advisory: 15, warning: 30, critical: 50 });
+    const [thresholds, setThresholds] = useState({ advisory: 15, warning: 30, critical: 50, measurement_unit: "cm" });
     const thresholdsRef = useRef(thresholds);
+
+    const unit = thresholds.measurement_unit || "cm";
+    const formatVal = (val) => {
+        if (val === null || val === undefined || val === "") return "0.00";
+        
+        // Extract numeric part if string (e.g., "15 cm" -> 15)
+        let numericVal = typeof val === 'string' ? parseFloat(val.replace(/[^\d.]/g, '')) : Number(val);
+        
+        if (isNaN(numericVal)) return "0.00";
+
+        if (unit === "m") return (numericVal / 100).toFixed(2);
+        return numericVal.toFixed(1);
+    };
 
     const calculateStatus = (level, activeThresholds = null) => {
         const thresh = activeThresholds || thresholdsRef.current;
         let val = 0;
         if (typeof level === 'string') {
-            // Strip "cm" and any non-numeric chars except decimal
+            // Strip "cm" or "m" and any non-numeric chars except decimal
             val = parseFloat(level.replace(/[^\d.]/g, '')) || 0;
+            // If it was already converted to m in the level string, this might be tricky, 
+            // but usually we store raw numbers or "X cm" in the state before display.
         } else {
             val = parseFloat(level) || 0;
         }
@@ -93,7 +110,7 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 status: calculateStatus(row.level)
             })));
         }
-    }, [thresholds.advisory, thresholds.warning, thresholds.critical]);
+    }, [thresholds.advisory, thresholds.warning, thresholds.critical, thresholds.measurement_unit]);
 
     // Fetch Data
     const fetchData = async () => {
@@ -113,7 +130,8 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 activeThresh = {
                     advisory: config.advisory_level,
                     warning: config.warning_level,
-                    critical: config.critical_level
+                    critical: config.critical_level,
+                    measurement_unit: config.measurement_unit || "cm"
                 };
                 thresholdsRef.current = activeThresh;
                 setThresholds(activeThresh);
@@ -124,9 +142,12 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             const sensorsData = await sensorsRes.json();
             const reportsData = await reportsRes.json();
 
+            const currentUnit = activeThresh.measurement_unit || "cm";
+            const peakVal = currentUnit === "m" ? (Number(summary.peak_flood_level ?? 0) / 100).toFixed(2) : (Number(summary.peak_flood_level ?? 0).toFixed(1));
+
             setAnalytics([
                 { label: "Collected Data", value: summary.total_readings ?? 0, icon: "database", color: "#3b82f6", bg: "#eff6ff" },
-                { label: "Peak Flood (cm)", value: summary.peak_flood_level ?? 0, icon: "trending-up", color: "#ef4444", bg: "#fef2f2" },
+                { label: `Peak Flood (${currentUnit})`, value: peakVal, icon: "trending-up", color: "#ef4444", bg: "#fef2f2" },
                 { label: "Reports", value: reportsData.length ?? 0, icon: "file-text", color: "#06b6d4", bg: "#ecfeff" },
                 { label: "Active Sensors", value: summary.active_sensors ?? 0, icon: "cpu", color: "#10b981", bg: "#ecfdf5" },
             ]);
@@ -148,10 +169,12 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                 const mappedHistory = history.map(h => {
                     const sensor = dynamicSensors.find(s => s.id === h.sensor_id || s.name === h.sensor);
                     const actualLoc = sensor?.barangay || h.location;
+                    const floodLvl = h.flood_level || h.level || 0;
                     return {
                         ...h,
                         location: (actualLoc === "General Area") ? "" : actualLoc,
-                        status: calculateStatus(h.flood_level || h.level, activeThresh)
+                        status: calculateStatus(floodLvl, activeThresh),
+                        displayLevel: floodLvl // Store raw value for formatting
                     };
                 });
                 setFloodHistory(mappedHistory);
@@ -207,7 +230,8 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             const newThresh = {
                 advisory: data.advisory_level,
                 warning: data.warning_level,
-                critical: data.critical_level
+                critical: data.critical_level,
+                measurement_unit: data.measurement_unit || "cm"
             };
             thresholdsRef.current = newThresh;
             setThresholds(newThresh);
@@ -221,10 +245,12 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
             // 1. Update analytics counts
             setAnalytics(prev => prev.map(item => {
                 if (item.label === "Collected Data") return { ...item, value: (parseInt(item.value) || 0) + 1 };
-                if (item.label === "Peak Flood (cm)") {
-                    const currentVal = parseFloat(item.value) || 0;
-                    const newVal = parseFloat(reading.flood_level) || 0;
-                    return { ...item, value: Math.max(currentVal, newVal) };
+                if (item.label.includes("Peak Flood")) {
+                    const currentUnit = thresholdsRef.current.measurement_unit || "cm";
+                    const currentRaw = (parseFloat(item.value) || 0) * (currentUnit === "m" ? 100 : 1);
+                    const newRaw = parseFloat(reading.flood_level) || 0;
+                    const maxRaw = Math.max(currentRaw, newRaw);
+                    return { ...item, value: currentUnit === "m" ? (maxRaw / 100).toFixed(2) : maxRaw.toFixed(1) };
                 }
                 return item;
             }));
@@ -264,7 +290,8 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                     id: Date.now(), // temporary ID
                     time: timePart,
                     date: datePart,
-                    level: `${reading.flood_level} cm`,
+                    level: reading.flood_level, // Store raw
+                    displayLevel: reading.flood_level, // Store raw for formatting
                     sensor: sensorObj.name,
                     location: sensorObj.barangay || "",
                     status: calculateStatus(reading.flood_level)
@@ -606,7 +633,7 @@ const DataReportsPage = ({ onNavigate, onLogout, userRole = "lgu" }) => {
                                             <Text style={[pg.tableCellBold, { flex: 1.5 }]}>{row.time} • {row.date}</Text>
                                             <Text style={[pg.tableCell, { flex: 1 }]}>{row.sensor}</Text>
                                             <Text style={[pg.tableCell, { flex: 1 }]}>{row.location}</Text>
-                                            <Text style={[pg.tableCellBold, { flex: 0.8, color: isCritical ? "#dc2626" : (isWarning ? "#f97316" : (isAdvisory ? "#3b82f6" : "#0f172a")) }]}>{row.level}</Text>
+                                            <Text style={[pg.tableCellBold, { flex: 0.8, color: isCritical ? "#dc2626" : (isWarning ? "#f97316" : (isAdvisory ? "#3b82f6" : "#0f172a")) }]}>{formatVal(row.displayLevel || row.level)} {unit}</Text>
                                             <View style={{ flex: 0.8 }}>
                                                 <View style={[pg.statusBadge, { backgroundColor: isCritical ? "#fee2e2" : (isWarning ? "#fff7ed" : (isAdvisory ? "#eff6ff" : "#f1f5f9")) }]}>
                                                     <Text style={[pg.statusBadgeText, { color: isCritical ? "#dc2626" : (isWarning ? "#f97316" : (isAdvisory ? "#3b82f6" : "#64748b")) }]}>{displayStatus}</Text>

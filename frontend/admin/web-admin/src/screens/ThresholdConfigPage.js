@@ -15,12 +15,13 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
     const [advisoryLevel, setAdvisoryLevel] = useState("15");
     const [warningLevel, setWarningLevel] = useState("30");
     const [criticalLevel, setCriticalLevel] = useState("50");
+    const [measurementUnit, setMeasurementUnit] = useState("cm");
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [successMessage, setSuccessMessage] = useState("");
     const [errorMessage, setErrorMessage] = useState("");
     const [infoMessage, setInfoMessage] = useState("");
-    const [initialThresholds, setInitialThresholds] = useState({ advisory: "15", warning: "30", critical: "50" });
+    const [initialThresholds, setInitialThresholds] = useState({ advisory: "15", warning: "30", critical: "50", unit: "cm" });
     const [onlineSensors, setOnlineSensors] = useState(0);
 
     useEffect(() => {
@@ -43,17 +44,34 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
         return () => clearInterval(interval);
     }, []);
 
+    // ── Helper: Convert from CM to Display Unit ──
+    const toDisplay = (val, unit) => {
+        if (!val) return "0";
+        if (unit === "m") return (parseFloat(val) / 100).toString();
+        return val.toString();
+    };
+
+    // ── Helper: Convert from Display Unit to CM ──
+    const fromDisplay = (val, unit) => {
+        if (!val) return 0;
+        if (unit === "m") return Math.round(parseFloat(val) * 100);
+        return parseInt(val);
+    };
+
     // ── Real-time Data Synchronization ──
     useDataSync({
         onThresholdUpdate: (data) => {
             console.log("[ThresholdConfig] Thresholds updated by another user, syncing...");
-            setAdvisoryLevel(String(data.advisory_level));
-            setWarningLevel(String(data.warning_level));
-            setCriticalLevel(String(data.critical_level));
+            const unit = data.measurement_unit || "cm";
+            setMeasurementUnit(unit);
+            setAdvisoryLevel(toDisplay(data.advisory_level, unit));
+            setWarningLevel(toDisplay(data.warning_level, unit));
+            setCriticalLevel(toDisplay(data.critical_level, unit));
             setInitialThresholds({
-                advisory: String(data.advisory_level),
-                warning: String(data.warning_level),
-                critical: String(data.critical_level)
+                advisory: toDisplay(data.advisory_level, unit),
+                warning: toDisplay(data.warning_level, unit),
+                critical: toDisplay(data.critical_level, unit),
+                unit: unit
             });
         }
     });
@@ -64,13 +82,16 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
             const res = await authFetch(`${API_BASE_URL}/api/config/thresholds`);
             if (res.ok) {
                 const data = await res.json();
-                setAdvisoryLevel(String(data.advisory_level));
-                setWarningLevel(String(data.warning_level));
-                setCriticalLevel(String(data.critical_level));
+                const unit = data.measurement_unit || "cm";
+                setMeasurementUnit(unit);
+                setAdvisoryLevel(toDisplay(data.advisory_level, unit));
+                setWarningLevel(toDisplay(data.warning_level, unit));
+                setCriticalLevel(toDisplay(data.critical_level, unit));
                 setInitialThresholds({
-                    advisory: String(data.advisory_level),
-                    warning: String(data.warning_level),
-                    critical: String(data.critical_level)
+                    advisory: toDisplay(data.advisory_level, unit),
+                    warning: toDisplay(data.warning_level, unit),
+                    critical: toDisplay(data.critical_level, unit),
+                    unit: unit
                 });
             } else {
                 console.error("Failed to fetch thresholds");
@@ -82,6 +103,22 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
         }
     };
 
+    const handleUnitChange = (newUnit) => {
+        if (newUnit === measurementUnit) return;
+        
+        // Convert current values to the new unit for display
+        if (newUnit === "m") {
+            setAdvisoryLevel((parseFloat(advisoryLevel) / 100).toString());
+            setWarningLevel((parseFloat(warningLevel) / 100).toString());
+            setCriticalLevel((parseFloat(criticalLevel) / 100).toString());
+        } else {
+            setAdvisoryLevel(Math.round(parseFloat(advisoryLevel) * 100).toString());
+            setWarningLevel(Math.round(parseFloat(warningLevel) * 100).toString());
+            setCriticalLevel(Math.round(parseFloat(criticalLevel) * 100).toString());
+        }
+        setMeasurementUnit(newUnit);
+    };
+
     const handleSave = async () => {
         setSuccessMessage("");
         setErrorMessage("");
@@ -90,7 +127,8 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
         const currentThresholds = {
             advisory: advisoryLevel,
             warning: warningLevel,
-            critical: criticalLevel
+            critical: criticalLevel,
+            unit: measurementUnit
         };
 
         if (initialThresholds && areValuesEqual(currentThresholds, initialThresholds)) {
@@ -105,16 +143,17 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    advisory_level: parseInt(advisoryLevel) || 15,
-                    warning_level: parseInt(warningLevel) || 30,
-                    critical_level: parseInt(criticalLevel) || 50
+                    advisory_level: fromDisplay(advisoryLevel, measurementUnit),
+                    warning_level: fromDisplay(warningLevel, measurementUnit),
+                    critical_level: fromDisplay(criticalLevel, measurementUnit),
+                    measurement_unit: measurementUnit
                 })
             });
 
             if (res.ok) {
                 setErrorMessage("");
                 setSuccessMessage("Configuration saved successfully!");
-                setInitialThresholds({ advisory: advisoryLevel, warning: warningLevel, critical: criticalLevel });
+                setInitialThresholds({ ...currentThresholds });
                 setTimeout(() => setSuccessMessage(""), 4000);
             } else {
                 setSuccessMessage("");
@@ -161,8 +200,46 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
                             <View style={styles.configLeftCol}>
                                 <View style={styles.configCard}>
                                     <View style={styles.configCardHeader}>
-                                        <Feather name="settings" size={24} color="#3b82f6" />
-                                        <Text style={styles.configCardTitle}>Water Level Thresholds</Text>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                            <Feather name="settings" size={24} color="#3b82f6" />
+                                            <Text style={styles.configCardTitle}>Water Level Thresholds</Text>
+                                        </View>
+                                        
+                                        {/* Unit Selector */}
+                                        <View style={{ flexDirection: 'row', backgroundColor: '#f1f5f9', borderRadius: 8, padding: 4 }}>
+                                            <TouchableOpacity 
+                                                onPress={() => handleUnitChange("cm")}
+                                                style={{ 
+                                                    paddingHorizontal: 12, 
+                                                    paddingVertical: 6, 
+                                                    backgroundColor: measurementUnit === "cm" ? "#fff" : "transparent",
+                                                    borderRadius: 6,
+                                                    shadowColor: measurementUnit === "cm" ? "#000" : "transparent",
+                                                    shadowOffset: { width: 0, height: 1 },
+                                                    shadowOpacity: 0.1,
+                                                    shadowRadius: 2,
+                                                    elevation: measurementUnit === "cm" ? 2 : 0
+                                                }}
+                                            >
+                                                <Text style={{ fontSize: 12, fontFamily: "Poppins_600SemiBold", color: measurementUnit === "cm" ? "#3b82f6" : "#64748b" }}>CM</Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity 
+                                                onPress={() => handleUnitChange("m")}
+                                                style={{ 
+                                                    paddingHorizontal: 12, 
+                                                    paddingVertical: 6, 
+                                                    backgroundColor: measurementUnit === "m" ? "#fff" : "transparent",
+                                                    borderRadius: 6,
+                                                    shadowColor: measurementUnit === "m" ? "#000" : "transparent",
+                                                    shadowOffset: { width: 0, height: 1 },
+                                                    shadowOpacity: 0.1,
+                                                    shadowRadius: 2,
+                                                    elevation: measurementUnit === "m" ? 2 : 0
+                                                }}
+                                            >
+                                                <Text style={{ fontSize: 12, fontFamily: "Poppins_600SemiBold", color: measurementUnit === "m" ? "#3b82f6" : "#64748b" }}>Meters</Text>
+                                            </TouchableOpacity>
+                                        </View>
                                     </View>
 
                                     {/* Advisory Input */}
@@ -170,7 +247,7 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
                                         <View style={styles.thresholdLabelRow}>
                                             <Text style={styles.thresholdLabel}>Advisory Level</Text>
                                             <View style={[styles.thresholdBadge, { backgroundColor: "#eff6ff", borderColor: "#bfdbfe" }]}>
-                                                <Text style={[styles.thresholdBadgeText, { color: "#2563eb" }]}>{advisoryLevel}cm</Text>
+                                                <Text style={[styles.thresholdBadgeText, { color: "#2563eb" }]}>{advisoryLevel}{measurementUnit}</Text>
                                             </View>
                                         </View>
                                         <TextInput
@@ -180,7 +257,7 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
                                             keyboardType="numeric"
                                         />
                                         <Text style={styles.thresholdDescription}>
-                                            Water level (in cm) that triggers advisory alerts to residents
+                                            Water level (in {measurementUnit}) that triggers advisory alerts to residents
                                         </Text>
                                     </View>
 
@@ -189,7 +266,7 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
                                         <View style={styles.thresholdLabelRow}>
                                             <Text style={styles.thresholdLabel}>Warning Level</Text>
                                             <View style={[styles.thresholdBadge, { backgroundColor: "#fff7ed", borderColor: "#fed7aa" }]}>
-                                                <Text style={[styles.thresholdBadgeText, { color: "#ea580c" }]}>{warningLevel}cm</Text>
+                                                <Text style={[styles.thresholdBadgeText, { color: "#ea580c" }]}>{warningLevel}{measurementUnit}</Text>
                                             </View>
                                         </View>
                                         <TextInput
@@ -199,7 +276,7 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
                                             keyboardType="numeric"
                                         />
                                         <Text style={styles.thresholdDescription}>
-                                            Water level (in cm) that triggers warning alerts and preparation notices
+                                            Water level (in {measurementUnit}) that triggers warning alerts and preparation notices
                                         </Text>
                                     </View>
 
@@ -208,7 +285,7 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
                                         <View style={styles.thresholdLabelRow}>
                                             <Text style={styles.thresholdLabel}>Critical Level</Text>
                                             <View style={[styles.thresholdBadge, { backgroundColor: "#fef2f2", borderColor: "#fecaca" }]}>
-                                                <Text style={[styles.thresholdBadgeText, { color: "#dc2626" }]}>{criticalLevel}cm</Text>
+                                                <Text style={[styles.thresholdBadgeText, { color: "#dc2626" }]}>{criticalLevel}{measurementUnit}</Text>
                                             </View>
                                         </View>
                                         <TextInput
@@ -218,7 +295,7 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
                                             keyboardType="numeric"
                                         />
                                         <Text style={styles.thresholdDescription}>
-                                            Water level (in cm) that triggers critical alerts and evacuation orders
+                                            Water level (in {measurementUnit}) that triggers critical alerts and evacuation orders
                                         </Text>
                                     </View>
 
@@ -269,13 +346,13 @@ const ThresholdConfigPage = ({ onNavigate, onLogout, userRole = "superadmin" }) 
                                         />
                                         <View style={styles.visualLabelOverlay}>
                                             <View style={styles.visualLabelItem}>
-                                                <Text style={styles.visualLabelText}>CRITICAL ≥ {criticalLevel}cm</Text>
+                                                <Text style={styles.visualLabelText}>CRITICAL ≥ {criticalLevel}{measurementUnit}</Text>
                                             </View>
                                             <View style={styles.visualLabelItem}>
-                                                <Text style={styles.visualLabelText}>WARNING  {warningLevel}cm - {criticalLevel}cm</Text>
+                                                <Text style={styles.visualLabelText}>WARNING  {warningLevel}{measurementUnit} - {criticalLevel}{measurementUnit}</Text>
                                             </View>
                                             <View style={styles.visualLabelItem}>
-                                                <Text style={styles.visualLabelText}>ADVISORY  {advisoryLevel}cm - {warningLevel}cm</Text>
+                                                <Text style={styles.visualLabelText}>ADVISORY  {advisoryLevel}{measurementUnit} - {warningLevel}{measurementUnit}</Text>
                                             </View>
                                         </View>
                                     </View>

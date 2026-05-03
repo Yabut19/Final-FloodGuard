@@ -4,6 +4,7 @@ _thresholds = {
     "advisory_cm": 10.0,
     "warning_cm": 15.0,
     "critical_cm": 25.0,
+    "measurement_unit": "cm"
 }
 _last_sync_time = 0
 
@@ -22,17 +23,19 @@ def sync_thresholds_from_db(force=False):
         cur = db.cursor(dictionary=True)
         cur.execute(
             "SELECT config_key, config_value FROM system_config "
-            "WHERE config_key IN ('advisory_level','warning_level','critical_level')"
+            "WHERE config_key IN ('advisory_level','warning_level','critical_level','measurement_unit')"
         )
         rows = cur.fetchall()
         cur.close()
-        mapping = {r["config_key"]: float(r["config_value"]) for r in rows}
+        mapping = {r["config_key"]: r["config_value"] for r in rows}
         if "advisory_level" in mapping:
-            _thresholds["advisory_cm"] = mapping["advisory_level"]
+            _thresholds["advisory_cm"] = float(mapping["advisory_level"])
         if "warning_level" in mapping:
-            _thresholds["warning_cm"] = mapping["warning_level"]
+            _thresholds["warning_cm"] = float(mapping["warning_level"])
         if "critical_level" in mapping:
-            _thresholds["critical_cm"] = mapping["critical_level"]
+            _thresholds["critical_cm"] = float(mapping["critical_level"])
+        if "measurement_unit" in mapping:
+            _thresholds["measurement_unit"] = mapping["measurement_unit"]
         _last_sync_time = now
     except Exception:
         pass  # fall back to in-memory defaults

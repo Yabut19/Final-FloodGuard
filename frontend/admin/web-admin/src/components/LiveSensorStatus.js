@@ -163,6 +163,14 @@ const WaterWave = ({ color, isOffline }) => {
 
 // ── Each card is its own component with its own Animated state ───────────────
 const SensorCard = ({ sensor, isLast, thresholds }) => {
+    const unit = thresholds?.measurement_unit || "cm";
+
+    // ── Helper: Format value based on current unit ──
+    const formatVal = (val) => {
+        if (unit === "m") return (Number(val || 0) / 100).toFixed(2);
+        return Number(val || 0).toFixed(1);
+    };
+
     const getLiveStatus = () => {
         // Check if sensor is enabled first
         if (sensor.enabled === false) return "OFF";
@@ -235,16 +243,16 @@ const SensorCard = ({ sensor, isLast, thresholds }) => {
                     {/* Scale Markers — Dynamic based on critical threshold */}
                     <View style={styles.sensorPillMarkers}>
                         <View style={styles.sensorPillMarkerLine}>
-                            <Text style={styles.sensorPillMarkerText}>{Math.round(maxLevel)}cm</Text>
+                            <Text style={styles.sensorPillMarkerText}>{formatVal(maxLevel)}{unit}</Text>
                         </View>
                         <View style={styles.sensorPillMarkerLine}>
-                            <Text style={styles.sensorPillMarkerText}>{Math.round(maxLevel * 0.75)}cm</Text>
+                            <Text style={styles.sensorPillMarkerText}>{formatVal(maxLevel * 0.75)}{unit}</Text>
                         </View>
                         <View style={styles.sensorPillMarkerLine}>
-                            <Text style={styles.sensorPillMarkerText}>{Math.round(maxLevel * 0.5)}cm</Text>
+                            <Text style={styles.sensorPillMarkerText}>{formatVal(maxLevel * 0.5)}{unit}</Text>
                         </View>
                         <View style={styles.sensorPillMarkerLine}>
-                            <Text style={styles.sensorPillMarkerText}>{Math.round(maxLevel * 0.25)}cm</Text>
+                            <Text style={styles.sensorPillMarkerText}>{formatVal(maxLevel * 0.25)}{unit}</Text>
                         </View>
                     </View>
                 </View>
@@ -254,19 +262,19 @@ const SensorCard = ({ sensor, isLast, thresholds }) => {
             <View style={styles.sensorCardValueSection}>
                 {!isGaugeActive ? (
                     <Text style={[styles.sensorCardValueLabel, { color: '#94a3b8' }]}>
-                        0.0<Text style={styles.sensorCardValueUnit}>cm</Text>
+                        0.00<Text style={styles.sensorCardValueUnit}>{unit}</Text>
                     </Text>
                 ) : (
                     <Text style={styles.sensorCardValueLabel}>
-                        {Number(sensor.waterLevel).toFixed(1)}
-                        <Text style={styles.sensorCardValueUnit}>cm</Text>
+                        {formatVal(sensor.waterLevel)}
+                        <Text style={styles.sensorCardValueUnit}>{unit}</Text>
                     </Text>
                 )}
                 {/* Raw distance — lets you verify the IoT device is sending data */}
                 <Text style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'Poppins_400Regular', marginTop: 2 }}>
                     {!isGaugeActive
-                        ? 'Raw: 0.0 cm'
-                        : `Raw dist: ${Number(sensor.rawDistance || 0).toFixed(1)} cm`}
+                        ? `Raw: 0.0 ${unit}`
+                        : `Raw dist: ${formatVal(sensor.rawDistance)} ${unit}`}
                 </Text>
                 <View style={[styles.sensorCardBadge, { backgroundColor: getStatusBgColor(liveStatus) }]}>
                     <Text style={[styles.sensorCardBadgeText, { color: getStatusColor(liveStatus) }]}>

@@ -59,7 +59,7 @@ export const useTheme = () => useContext(ThemeContext);
 const LocationContext = createContext(null);
 const useUserLocation = () => useContext(LocationContext);
 
-const API_BASE = "http://10.177.211.238:5000"; // Global API base URL
+const API_BASE = "http://10.234.77.238:5000"; // Global API base URL
 
 const UserDataContext = createContext(null);
 export const useUserData = () => useContext(UserDataContext);
@@ -2170,13 +2170,23 @@ const DashboardScreen = ({ navigation }) => {
   const styles = getStyles(theme);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [latestSensor, setLatestSensor] = useState(null);
-  const [thresholds, setThresholds] = useState({ advisory_cm: 10, warning_cm: 15, critical_cm: 25 });
+  const [thresholds, setThresholds] = useState({ advisory_cm: 10, warning_cm: 15, critical_cm: 25, measurement_unit: "cm" });
+
   const [loadingSensor, setLoadingSensor] = useState(true);
   const { userData } = useUserData();
   const [lastUpdated, setLastUpdated] = useState(null);
   const [isDisconnected, setIsDisconnected] = useState(true);
   const esRef = useRef(null);
   const fallbackRef = useRef(null);
+
+  const unit = thresholds.measurement_unit || "cm";
+  const formatVal = (val) => {
+    if (val === null || val === undefined || val === "") return "0.00";
+    let numericVal = typeof val === 'string' ? parseFloat(val.replace(/[^\d.]/g, '')) : Number(val);
+    if (isNaN(numericVal)) return "0.00";
+    if (unit === "m") return (numericVal / 100).toFixed(2);
+    return numericVal.toFixed(1);
+  };
 
   // ── LOCATION-BASED SYNC: Track user's sitio for sensor matching ──
   const userSitioRef = useRef(userData?.barangay || null);
@@ -2291,7 +2301,8 @@ const DashboardScreen = ({ navigation }) => {
           setThresholds({
             advisory_cm: data.advisory_level,
             warning_cm: data.warning_level,
-            critical_cm: data.critical_level
+            critical_cm: data.critical_level,
+            measurement_unit: data.measurement_unit || "cm"
           });
         }
       } catch (e) {
@@ -2315,7 +2326,8 @@ const DashboardScreen = ({ navigation }) => {
           setThresholds({
             advisory_cm: data.advisory_level,
             warning_cm: data.warning_level,
-            critical_cm: data.critical_level
+            critical_cm: data.critical_level,
+            measurement_unit: data.measurement_unit || "cm"
           });
         } else {
           fetchThresholds(); // Fallback if data payload is missing
@@ -2441,7 +2453,7 @@ const DashboardScreen = ({ navigation }) => {
                 ].map((level, i) => (
                   <React.Fragment key={`${level}-${i}`}>
                     <View style={[styles.gaugeLevelMark, { top: `${20 * (i + 1)}%` }]}>
-                      <Text style={styles.gaugeMarkText}>{level}cm</Text>
+                      <Text style={styles.gaugeMarkText}>{formatVal(level)}{unit}</Text>
                     </View>
                     <View style={[styles.gaugeLevelDivider, { top: `${20 * (i + 1)}%` }]} />
                   </React.Fragment>
@@ -2457,9 +2469,9 @@ const DashboardScreen = ({ navigation }) => {
               {/* Flood Level */}
               <View style={styles.gaugeReading}>
                 <Text style={styles.gaugeReadingValue}>
-                  {loadingSensor ? "--" : floodLevel.toFixed(1)}
+                  {loadingSensor ? "--" : formatVal(floodLevel)}
                 </Text>
-                <Text style={styles.gaugeReadingUnit}>cm</Text>
+                <Text style={styles.gaugeReadingUnit}>{unit}</Text>
               </View>
               <Text style={{ color: theme.textSecondary, fontSize: 10, textAlign: 'center', marginBottom: 6, letterSpacing: 0.5 }}>
                 FLOOD LEVEL
@@ -2476,7 +2488,7 @@ const DashboardScreen = ({ navigation }) => {
           <View style={styles.sensorCardFooter}>
             <View style={styles.footerInfoItem}>
               <Feather name="info" size={14} color="#64748b" />
-              <Text style={styles.thresholdText}>Current Max Level: <Text style={styles.thresholdTextBold}>{Math.round(maxRange)} cm</Text></Text>
+              <Text style={styles.thresholdText}>Current Max Level: <Text style={styles.thresholdTextBold}>{formatVal(maxRange)} {unit}</Text></Text>
             </View>
 
           </View>
@@ -2494,7 +2506,7 @@ const MapScreen = ({ navigation, route }) => {
   const [sensorPointsState, setSensorPointsState] = useState(SENSOR_POINTS);
   const [sensorData, setSensorData] = useState([]);
   const [loadingSensors, setLoadingSensors] = useState(true);
-  const [thresholds, setThresholds] = useState({ advisory_cm: 10, warning_cm: 15, critical_cm: 25 });
+  const [thresholds, setThresholds] = useState({ advisory_cm: 10, warning_cm: 15, critical_cm: 25, measurement_unit: "cm" });
   const [userData, setUserData] = useState(null);
   const userSitioRef = useRef(null);
 
@@ -2566,7 +2578,8 @@ const MapScreen = ({ navigation, route }) => {
         setThresholds({
           advisory_cm: data.advisory_level,
           warning_cm: data.warning_level,
-          critical_cm: data.critical_level
+          critical_cm: data.critical_level,
+          measurement_unit: data.measurement_unit || "cm"
         });
       }
     } catch (e) { console.log("[Mobile Map] Error fetching thresholds:", e); }
@@ -2598,7 +2611,8 @@ const MapScreen = ({ navigation, route }) => {
           setThresholds({
             advisory_cm: data.advisory_level,
             warning_cm: data.warning_level,
-            critical_cm: data.critical_level
+            critical_cm: data.critical_level,
+            measurement_unit: data.measurement_unit || "cm"
           });
         } else {
           fetchThresholds();
